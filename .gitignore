@@ -1,3 +1,15 @@
+# PyCharm-related
+.idea/
+.idea/inspectionProfiles
+_test.py
+A2LHelper.py
+CANape.INI
+info.txt
+*.asc
+SVS350_Master.a2l
+Xcp_Cfg.h
+edited files/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
