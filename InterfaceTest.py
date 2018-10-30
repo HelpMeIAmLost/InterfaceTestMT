@@ -14,25 +14,38 @@ import logging
 
 class InterfaceTest(object):
     def __init__(self):
+        # XCP message IDs
+        self.master_id = 0x7E0
+        self.slave_id = 0x7E1
+        # Connect to database for error-checking
         conn = sqlite3.connect('main.db')
         self.c = conn.cursor()
 
         # configure logging settings
         logging.basicConfig(level=logging.DEBUG, format=' %(asctime)s - %(levelname)s- %(message)s')
 
-        # self.bus1 = can.interface.Bus(bustype='vector', channel=0, bitrate=500000, app_name='InterfaceTest')
-        self.bus2 = can.interface.Bus(bustype='vector', channel=1, receive_own_messages=False, bitrate=500000, app_name='InterfaceTest')
-        # self.bus2 = can.interface.Bus(bustype='vector', channel=1, can_filters=[{"can_id": 0x7e1, "can_mask": 0x7ef, "extended": False}], receive_own_messages=False, bitrate=500000, app_name='InterfaceTest')
-        # self.bus3 = can.interface.Bus(bustype='vector', channel=2, bitrate=500000, app_name='InterfaceTest')
-        # self.bus4 = can.interface.Bus(bustype='vector', channel=3, bitrate=500000, app_name='InterfaceTest')
+        try:
+            # self.bus1 = can.interface.Bus(bustype='vector', channel=0, bitrate=500000, app_name='InterfaceTest')
+            # self.bus2 = can.interface.Bus(bustype='vector', channel=1, receive_own_messages=True, bitrate=500000,
+            #                               app_name='InterfaceTest')
+            # self.bus2 = can.interface.Bus(bustype='vector', channel=1,
+            #                               can_filters=[{"can_id": 0x7e1, "can_mask": 0x7ef, "extended": False}],
+            #                               receive_own_messages=True, bitrate=500000, app_name='InterfaceTest')
+            self.bus2 = can.ThreadSafeBus(bustype='vector', channel=1,
+                                          can_filters=[{"can_id": 0x7e1, "can_mask": 0x7ef, "extended": False}],
+                                          receive_own_messages=True, bitrate=500000, app_name='InterfaceTest')
+            # self.bus3 = can.interface.Bus(bustype='vector', channel=2, bitrate=500000, app_name='InterfaceTest')
+            # self.bus4 = can.interface.Bus(bustype='vector', channel=3, bitrate=500000, app_name='InterfaceTest')
 
-#        self.bus1 = Bus(config_section='CAN1')
-#        self.bus2 = Bus(config_section='CAN2')
-#        self.bus3 = Bus(config_section='CAN3')
-#        self.bus4 = Bus(config_section='CAN4')
-        
-#        self.bus2.set_filters([{"can_id": 0x7e1, "can_mask": 0x7ef, "extended": False}])
-            
+            # Connect using the can.ini file
+            # self.bus1 = Bus(config_section='CAN1')
+            # self.bus2 = Bus(config_section='CAN2')
+            # self.bus3 = Bus(config_section='CAN3')
+            # self.bus4 = Bus(config_section='CAN4')
+        except can.interfaces.vector.exceptions.VectorError as message:
+            logging.error(message)
+            exit(-1)
+
         # CAN logger
         self.logfile = open('log.asc', 'w+')
         self.ascwriter = can.ASCWriter('log.asc')
@@ -44,240 +57,199 @@ class InterfaceTest(object):
         # Info logger
         self.loginfo = open('info.txt', 'w+')
 
+        # Data check
+        self.input_timestamp = 0.0
+        self.input_value = 0.0
+        self.output_timestamp = 0.0
+        self.output_value = 0.0
+        self.cmd_sent = False
+
     def connect(self, bus):
         msg = can.Message(arbitration_id=0x7e0,
                           data=[0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
                           extended_id=False)
         self.send_once(bus, msg)
         
-    def start_polling(self, bus, msg, cycle_s):
+    @staticmethod
+    def start_polling(bus, msg, cycle_s):
         try:
-            ## Display bus output
-    ##        notifier = can.Notifier([self.bus1, self.bus2, self.bus3, self.bus4], [can.Printer()])
-        
-            ## Send messages
+            # Send a periodic message
             return bus.send_periodic(msg, cycle_s, False)
 
         except can.CanError:
             print("Message NOT sent")
 
+    # Non-short upload commands
     def send_once(self, bus, msg):
-        # self.loginfo.write(str(time.process_time()) + " " + msg.__str__() + "\n")
         bus.send(msg)
-        
-        response_message = self.check_xcp_response(bus, 0x7E1)
+        response_message = self.check_xcp_response(bus, self.slave_id)
         command = hex(msg.data[0])
 
-        if response_message.data[0] == 0xFF:
-            # response indicates command successful
-            if msg.data[0] == 0xF6:
-                logging.debug('Command: SET_MTA Response: Success Address: 0x{}{}{}{}'.format(format(msg.data[7], 'x'), format(msg.data[6], 'x'), format(msg.data[5], 'x'), format(msg.data[4], 'x')))
-            elif msg.data[0] == 0xF0:
-                logging.debug('Command: DOWNLOAD Response: Success')
-            elif msg.data[0] == 0xFF:
-                logging.debug('Command: {} Response: Connected to XCP slave through {}'.format(command, bus))
-            elif msg.data[0] == 0xFE:
-                logging.debug('Command: {} Response: Disconnected from XCP slave'.format(command))
+        if response_message is not None:
+            # Response packet
+            if response_message.data[0] == 0xFF:
+                # response indicates command successful
+                if msg.data[0] == 0xF6:
+                    logging.debug('Command: SET_MTA       Response: Success Address: 0x{}{}{}{}'.format(
+                        format(msg.data[7], 'x'),
+                        format(msg.data[6], 'x'),
+                        format(msg.data[5], 'x'),
+                        format(msg.data[4], 'x')))
+                elif msg.data[0] == 0xF4:
+                    logging.debug('Command: SHORT_UPLOAD  Response: Success')
+                    # Check the output
+                    # self.loginfo.write('Timestamp: {} Value: {}\n'.format(response_message.timestamp, msg.data[2]))
+                    # if self.cmdsent is True:
+                    #     self.cmdsent = False
+                    #     self.edgetimestamp = response_message.timestamp - self.cmdtimestamp
+                    #     if self.inputvalue == response_message.data[1] and self.edgetimestamp <= 0.05:
+                    #         print('Passed!')
+                elif msg.data[0] == 0xFF:
+                    logging.debug('Command: CONNECT       Response: Connected to XCP slave through {}'.format(bus))
+                elif msg.data[0] == 0xFE:
+                    logging.debug('Command: DISCONNECT    Response: Disconnected from XCP slave')
+                else:
+                    logging.debug('Command: {}            Response: Success'.format(hex(command)))
+            # Error packet
+            elif response_message.data[0] == 0xFE:
+                # response indicates error, report error
+                error_code = response_message.data[1]
+                self.c.execute("SELECT * FROM error_array WHERE error_code=?", (error_code,))
+                error_info = self.c.fetchone()
+                if error_info is not None:
+                    logging.debug('Command: {}            Response: {} {}'.format(command, error_info[1],
+                                                                                  error_info[2].strip()))
+                else:
+                    logging.debug('Command: {}            Response: {}'.format(command, hex(response_message.data[1])))
+            elif response_message.data[0] == 0x20:
+                logging.debug('Command: {}            Response: XCP_ERR_CMD_UNKNOWN'.format(command))
             else:
-                logging.debug('Command: {} Response: Success'.format(command))
-        elif response_message.data[0] == 0xFE:
-            # response indicates error, report error
-            error_code = response_message.data[1]
-            self.c.execute("SELECT * FROM error_array WHERE error_code=?", (error_code,))
-            error_info = self.c.fetchone()
-            if error_info is not None:
-                logging.debug('Command: {} Response: {} {}'.format(command, error_info[1], error_info[2].strip()))
-            else:
-                logging.debug('Command: {} Response: {}'.format(command, hex(response_message.data[1])))
-        elif response_message.data[0] == 0x20:
-            logging.debug('Command: {} Response: XCP_ERR_CMD_UNKNOWN'.format(command))
+                logging.debug('Command: {}            Response: {}'.format(command, hex(response_message.data[0])))
         else:
-            logging.debug('Command: {} Response: {}'.format(command, hex(response_message.data[0])))
-            # pass
+            logging.debug('Command: {}          Response: XCP slave response timeout!'.format(command))
+
+    def xcp_download(self, bus, msg1, msg2):
+        # SET_MTA
+
+        response_message = None
+        while response_message is None:
+            bus.send(msg1)
+            response_message = self.check_xcp_response(bus, self.slave_id)
+
+        if response_message is not None:
+            if response_message.data[0] == 0xFF:
+                # response indicates command successful
+                logging.debug(
+                    'Command: SET_MTA       Response: Success Address: 0x{}{}{}{}'.format(
+                        format(msg1.data[7], 'x'), format(msg1.data[6], 'x'),
+                        format(msg1.data[5], 'x'), format(msg1.data[4], 'x'))
+                )
+
+                # DOWNLOAD
+                bus.send(msg2)
+                response_message = self.check_xcp_response(bus, self.slave_id)
+
+                if response_message is not None:
+                    if response_message.data[0] == 0xFF:
+                        # response indicates command successful
+                        logging.debug('Command: DOWNLOAD      Response: Success')
+                        self.loginfo.write('Timestamp: {} Value: {}\n'.format(response_message.timestamp, msg2.data[2]))
+                        # Get timestamp and value
+                        # self.cmdtimestamp = response_message.timestamp
+                        # self.inputvalue = msg2.data[2]
+                        # self.cmdsent = True
+                else:
+                    logging.debug('Command: DOWNLOAD      Response: XCP slave response timeout!')
+            elif response_message.data[0] == 0x20:
+                logging.debug('Command: SET_MTA       Response: XCP_ERR_CMD_UNKNOWN')
+            else:
+                logging.debug('Command: SET_MTA       Response: {}'.format(hex(response_message.data[0])))
+        else:
+            logging.debug('Command: SET_MTA       Response: XCP slave response timeout!')
+# End
 
     def end_polling(self, task):
         task.stop()
 
     def end_logging(self):
-        self.notifier.stop()
-        self.ascwriter.stop()
-
         self.loginfo.close()
         self.logfile.close()
 
     def disconnect(self, bus):
+        self.notifier.stop()
+        self.ascwriter.stop()
+
         msg = can.Message(arbitration_id=0x7e0,
                           data=[0xFE, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
                           extended_id=False)
         self.send_once(bus, msg)
 
+        bus.shutdown()
+
     @staticmethod
     def check_xcp_response(bus, xcp_rx_id):
         # read response
         # NOTE: add more sophisticated XCP error reporting using error array
-        for recvd_msg in bus:
+        #
+        # try:
+        #     for recvd_msg in bus:
+        #         if recvd_msg.arbitration_id == xcp_rx_id:
+        #             print(recvd_msg)
+        #             return recvd_msg
+        #
+        # except None:
+        #     print('No response from XCP slave!')
+        try:
+            recvd_msg = bus.recv(0.05)
             if recvd_msg.arbitration_id == xcp_rx_id:
                 print(recvd_msg)
                 return recvd_msg
+            else:
+                print(recvd_msg)
+                # logging.debug('XCP slave response timeout!')
 
-##            ## Send once
-##            # CAN to APP
-##            # Result: OK
-##    ####        print("Start monitoring FSFC_f_ABS_Op in channel 2")
-##    ####        task = bus2.send_periodic(cmdSHORT_UPLOAD_FSFC_f_ABS_Op, 0.010)
-##    ##        print("Updating VDC139_4_4_ACTIVATE_ABS signal and sending it to channel 4")
-##    ##        bus4.send(msgVDC139_00)
-##    ##        sleep(3)
-##    ##        bus4.send(msgVDC139_01)
-##    ##        sleep(1)
-##    ##        bus4.send(msgVDC139_00)
-##    ##        sleep(3)
-##
-##    ##        # APP to APP
-##    ##        # Result: NG
-##    ##        print("Start monitoring the following signals in channel 2:")
-##    ##        print("   ACC_Main_f_fACCFail")
-##    ##        print("   CUS_f_ACC_FAIL")
-##    ##        print("   HMI_f_ACCFail")
-##    ##        print("   SAS_f_ACCFail")
-##    ##        task = bus2.send_periodic(ACC_Main_f_fACCFail, 0.050)
-##    ##        task = bus2.send_periodic(CUS_f_ACC_FAIL, 0.010)
-##    ##        task = bus2.send_periodic(HMI_f_ACCFail, 0.010)
-##    ##        task = bus2.send_periodic(SAS_f_ACCFail, 0.010)
-##            bus2.send(cmdSET_MTA_FSFC_f_Eye_Fail)
-##            bus2.send(cmdDOWNLOAD_OFF)
-##            sleep(3)
-##            bus2.send(cmdSET_MTA_FSFC_f_Eye_Fail)
-##            bus2.send(cmdDOWNLOAD_ON)
-##            sleep(1)
-##            bus2.send(cmdSET_MTA_FSFC_f_Eye_Fail)
-##            bus2.send(cmdDOWNLOAD_OFF)
-##            sleep(3)
-##    ##        #bus2.send(cmdSET_MTA)
-##    ##        #bus2.send(cmdDOWNLOAD_00)
-##    ##        #bus2.send(cmdSHORT_UPLOAD)
-##    ##
-##    ##        # APP to CAN
-##    ##        # Result:
-##    ##        print("Updating FSFC_f_ACCFailForVDC in channel 2")
-##    ##        bus2.send(cmdSET_MTA_FSFC_f_ACCFailForVDC)
-##    ##        bus2.send(cmdDOWNLOAD_OFF)
-##    ##        sleep(3)
-##    ##        bus2.send(cmdSET_MTA_FSFC_f_ACCFailForVDC)
-##    ##        bus2.send(cmdDOWNLOAD_ON)
-##    ##        sleep(1)
-##    ##        bus2.send(cmdSET_MTA_FSFC_f_ACCFailForVDC)
-##    ##        bus2.send(cmdDOWNLOAD_OFF)
-##    ##        sleep(3)
-##
-##            ## End task
-##            # End display output
-##    ##        notifier.stop(5)
-##    ##        task.stop()
-##            
-##    ##        print(res)
-##    ##        if res.data[0] == 0xFF:
-##    ##            print("Success! Sending DOWNLOAD request to channel 2")
-##    ##            bus2.send(cmdDOWNLOAD_01)
-##    ##            res = bus2BufferedReader.get_message(timeout=0.5)
-##    ##            if res.data[0] == 0xFF:
-##    ##                print("Success!")
-##
-##            ##print("Message sent on {}".format(bus.channel_info))
-##    ##        print("Creating cyclic task to a send message every 20 ms")
-##    ##        task = bus2.send_periodic(msg, 0.020)
-##    #        bus2Listener.stop()
+        except can.VectorError as message:
+            logging.error(message)
 
 
 def main():
     # Common messages
-    cmdDOWNLOAD_ON = can.Message(arbitration_id=0x7e0,
-                                 data=[0xF0, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00],
-                                 extended_id=False)
-    cmdDOWNLOAD_OFF = can.Message(arbitration_id=0x7e0,
-                                  data=[0xF0, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+    cmd_download_on = can.Message(arbitration_id=0x7e0,
+                                  data=[0xF0, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00],
                                   extended_id=False)
-    # CAN to APP
-    # VDC139_4_4_ACTIVATE_ABS: CH 4
-    # FSFC_f_ABS_Op: 0x9004245c
-    msgVDC139_01 = can.Message(arbitration_id=0x139,
-                               data=[0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00],
-                               extended_id=False)
-    msgVDC139_00 = can.Message(arbitration_id=0x139,
-                               data=[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-                               extended_id=False)
-    cmdSHORT_UPLOAD_FSFC_f_ABS_Op = can.Message(arbitration_id=0x7e0,
-                                                data=[0xF4, 0x01, 0x00, 0x00, 0x5C, 0x24, 0x04, 0x90],
-                                                extended_id=False)
-
+    cmd_download_off = can.Message(arbitration_id=0x7e0,
+                                   data=[0xF0, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+                                   extended_id=False)
     # APP to APP
-    # FSFC_f_Eye_Fail: 0x90042464
-    # ACC_Main_f_fACCFail: 0x50016840
-    # CUS_f_ACC_FAIL: 0x50016948
-    # HMI_f_ACCFail: 0x90042F58
-    # SAS_f_ACCFail: 0x9004BBD4
-    cmdSET_MTA_FSFC_f_Eye_Fail = can.Message(arbitration_id=0x7e0,
-                                             data=[0xF6, 0x00, 0x00, 0x00, 0x64, 0x24, 0x04, 0x90],
-                                             extended_id=False)
-    cmdSHORT_UPLOAD_ACC_Main_f_fACCFail = can.Message(arbitration_id=0x7e0,
-                                                      data=[0xF4, 0x01, 0x00, 0x00, 0x40, 0x68, 0x01, 0x50],
-                                                      extended_id=False)
-    cmdSHORT_UPLOAD_CUS_f_ACC_FAIL = can.Message(arbitration_id=0x7e0,
-                                                 data=[0xF4, 0x01, 0x00, 0x00, 0x48, 0x69, 0x01, 0x50],
-                                                 extended_id=False)
-    cmdSHORT_UPLOAD_HMI_f_ACCFail = can.Message(arbitration_id=0x7e0,
-                                                data=[0xF4, 0x01, 0x00, 0x00, 0x58, 0x2F, 0x04, 0x90],
-                                                extended_id=False)
-    cmdSHORT_UPLOAD_SAS_f_ACCFail = can.Message(arbitration_id=0x7e0,
-                                                data=[0xF4, 0x01, 0x00, 0x00, 0xD4, 0xBB, 0x04, 0x90],
-                                                extended_id=False)
-
-    # APP to CAN
-    # FSFC_f_ACCFailForVDC: 0x90042460
-    # EYE220_4_5_FAIL_ACC_FOR_VDC: CH 4
-    cmdSET_MTA_FSFC_f_ACCFailForVDC = can.Message(arbitration_id=0x7e0,
-                                                  data=[0xF6, 0x00, 0x00, 0x00, 0x60, 0x24, 0x04, 0x90],
-                                                  extended_id=False)
-
     # For polling signals
-    # ACC_Main_ACCSelectObj -
-    cmdSHORT_UPLOAD1 = can.Message(arbitration_id=0x7e0,
-                                   data=[0xF4, 0x01, 0x00, 0x00, 0x14, 0x68, 0x00, 0x50],
-                                   extended_id=False)
     # VDC_ACCSelectObj - 50017f1c
-    cmdSHORT_UPLOAD2 = can.Message(arbitration_id=0x7e0,
-                                   data=[0xF4, 0x01, 0x00, 0x00, 0x1C, 0x7F, 0x01, 0x50],
-                                   extended_id=False)
-
+    cmd_short_upload_output = can.Message(arbitration_id=0x7e0,
+                                          data=[0xF4, 0x01, 0x00, 0x00, 0x1C, 0x7F, 0x01, 0x50],
+                                          extended_id=False)
     # For update
-    cmdSET_MTA1 = can.Message(arbitration_id=0x7e0,
+    cmd_set_mta = can.Message(arbitration_id=0x7e0,
                               data=[0xF6, 0x00, 0x00, 0x00, 0x14, 0x68, 0x00, 0x50],
                               extended_id=False)
 
-    iTest = InterfaceTest()
-
-    iTest.connect(iTest.bus2)
-
-    # task1 = iTest.start_polling(iTest.bus2, cmdSHORT_UPLOAD1, 0.050)
-    task2 = iTest.start_polling(iTest.bus2, cmdSHORT_UPLOAD2, 0.010)
-    #
-    # iTest.send_once(iTest.bus2, cmdSHORT_UPLOAD2)
-    # iTest.send_once(iTest.bus2, cmdSET_MTA1)
-    # iTest.send_once(iTest.bus2, cmdDOWNLOAD_OFF)
-    # sleep(3)
-    iTest.send_once(iTest.bus2, cmdSET_MTA1)
-    iTest.send_once(iTest.bus2, cmdDOWNLOAD_ON)
+    interface_test = InterfaceTest()
+    # Connect to the XCP slave
+    interface_test.connect(interface_test.bus2)
+    sleep(1)
+    # Poll the output signal every 10ms
+    task2 = interface_test.start_polling(interface_test.bus2, cmd_short_upload_output, 0.010)
+    sleep(1)
+    # Write the first value to the input signal (SET_MTA -> DOWNLOAD)
+    interface_test.xcp_download(interface_test.bus2, cmd_set_mta, cmd_download_on)
     sleep(3)
-    iTest.send_once(iTest.bus2, cmdSET_MTA1)
-    iTest.send_once(iTest.bus2, cmdDOWNLOAD_OFF)
-    sleep(3)
-    #
-    # iTest.end_polling(task1)
-    iTest.end_polling(task2)
-    #
-    iTest.end_logging()
-
-    iTest.disconnect(iTest.bus2)
+    # Write the second value to the input signal (SET_MTA -> DOWNLOAD)
+    interface_test.xcp_download(interface_test.bus2, cmd_set_mta, cmd_download_off)
+    sleep(1)
+    # End polling of output signal
+    interface_test.end_polling(task2)
+    # Disconnect from XCP slave
+    interface_test.disconnect(interface_test.bus2)
+    # End logging (ASC and info)
+    interface_test.end_logging()
 
 
 if __name__ == '__main__':
