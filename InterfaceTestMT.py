@@ -7,7 +7,7 @@ from time import sleep
 # from can.interface import Bus
 
 import can
-# import time
+import time
 import sqlite3
 import logging
 import threading
@@ -30,7 +30,7 @@ class InterfaceTestMT(object):
             #                               can_filters=[{"can_id": 0x7e1, "can_mask": 0x7ef, "extended": False}],
             #                               receive_own_messages=True, bitrate=500000, app_name='InterfaceTest')
             self.bus2 = can.ThreadSafeBus(bustype='vector', channel=1,
-                                          can_filters=[{"can_id": 0x7e1, "can_mask": 0x7ef, "extended": False}],
+                                          can_filters=[{"can_id": 0x7e1, "can_mask": 0x7e1, "extended": False}],
                                           receive_own_messages=True, bitrate=500000, app_name='InterfaceTest')
             # self.bus3 = can.interface.Bus(bustype='vector', channel=2, bitrate=500000, app_name='InterfaceTest')
             # self.bus4 = can.interface.Bus(bustype='vector', channel=3, bitrate=500000, app_name='InterfaceTest')
@@ -53,30 +53,34 @@ class InterfaceTestMT(object):
         # self.notifier.add_bus(self.bus4)
 
     def connect(self, bus):
+        global start_s
+
         print("Connecting to XCP slave..")
         msg = can.Message(arbitration_id=0x7e0,
                           data=[0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
                           extended_id=False)
+        start_s = time.time()
         self.send_once(bus, msg)
+        sleep(1)
 
     def send_once(self, bus, msg):
         tries = 0
         bus.send(msg)
         response_message = self.check_xcp_response(bus, slave_id)
         # Keep sending connect request until a response is received
-        while response_message is None or tries > 9:
+        while response_message is None and tries < 9:
             tries += 1
             if msg.data[0] == 0xFF:
-                print("Main: Retrying to connect to XCP slave.. {}".format(tries))
+                print("InterfaceTestMT: Retrying to connect to XCP slave.. {}".format(tries))
             elif msg.data[0] == 0xFE:
-                print("Main: Retrying to disconnect from XCP slave.. {}".format(tries))
+                print("InterfaceTestMT: Retrying to disconnect from XCP slave.. {}".format(tries))
             bus.send(msg)
             response_message = self.check_xcp_response(bus, slave_id)
         if tries > 9:
             if msg.data[0] == 0xFF:
-                print("Failed to connect to the XCP slave!")
+                print("InterfaceTestMT: Failed to connect to the XCP slave!")
             elif msg.data[0] == 0xFE:
-                print("Failed to disconnect from the XCP slave!")
+                print("InterfaceTestMT: Failed to disconnect from the XCP slave!")
             exit(-1)
         command = hex(msg.data[0])
 
@@ -111,7 +115,7 @@ class InterfaceTestMT(object):
             logging.debug('Command: {}          Response: XCP slave response timeout!'.format(command))
 
     def end_logging(self):
-        # self.log_info.close()
+        # self.log_to_output.close()
         self.can_log.close()
 
     def disconnect(self, bus):
@@ -189,11 +193,12 @@ class IOStream(threading.Thread):
             #     response_message = self.check_xcp_response(self.bus, slave_id)
             self.bus.send(self.message)
             response_message = self.check_xcp_response(self.bus, slave_id)
-            command = hex(self.message.data[0])
 
+            command = hex(self.message.data[0])
             if response_message is not None:
                 # Response packet
                 if response_message.data[0] == 0xFF:
+                    thread_lock.release()
                     # response indicates command successful
                     # if self.message.data[0] == 0xF6:
                     #     logging.debug('Command: SET_MTA       Response: Success Address: 0x{}{}{}{}'.format(
@@ -209,26 +214,39 @@ class IOStream(threading.Thread):
                                 if self.name == "input" and g_input_updated is False:
                                     g_timestamp = response_message.timestamp
                                     g_input_updated = True
+                                    # Log to output file
+                                    log_to_output.write("{}  {}: {}\n".format(
+                                        round(response_message.timestamp - start_s, 4),
+                                        self.signal_name,
+                                        hex(response_message.data[1]))
+                                    )
                                 elif self.name == "output" and g_input_updated is True:
+                                    # Log to output file
+                                    log_to_output.write("{}  {}: {}\n".format(
+                                        round(response_message.timestamp - start_s, 4),
+                                        self.signal_name,
+                                        hex(response_message.data[1]))
+                                    )
                                     g_timestamp = abs(response_message.timestamp - g_timestamp)
                                     if g_timestamp <= (self.cycle / 1000):
-                                        log_info.write("Update successful! ")
+                                        log_to_output.write("Update successful! ")
                                         test_passed = True
                                     else:
-                                        log_info.write("Update failed! ")
+                                        log_to_output.write("Update failed! ")
                                         test_passed = False
-                                        thread_lock.release()
-                                        return
-                                    log_info.write("Time: {}\n".format(
-                                            g_timestamp))
+                                        # thread_lock.release()
+                                        # return
+                                    log_to_output.write("Time: {} ms\n".format(
+                                            int(g_timestamp * 1000)))
                                     # Reset globals
                                     g_value_updated = False
                                     g_value = 0
                                     g_timestamp = 0.0
                                     g_input_updated = False
-                        log_info.write("{}  {}: {}\n".format(response_message.timestamp,
-                                                             self.signal_name,
-                                                             hex(response_message.data[1])))
+                        # Log to output file
+                        # log_to_output.write("{}  {}: {}\n".format(response_message.timestamp,
+                        #                                      self.signal_name,
+                        #                                      hex(response_message.data[1])))
                     else:
                         logging.debug('Command: {}            Response: Success'.format(hex(command)))
                 # Error packet
@@ -252,7 +270,8 @@ class IOStream(threading.Thread):
                     command,
                     self.signal_name))
 
-            thread_lock.release()
+            if thread_lock.locked():
+                thread_lock.release()
             # if self.name == "input":
             #     sleep(self.cycle/1000)
             # elif self.name == "output":
@@ -280,7 +299,8 @@ class IOStream(threading.Thread):
             # Set timeout for response message
             received_msg = bus.recv(0.05)
             if received_msg is None:
-                print("IOStream: No message received from {}!".format(bus))
+                # print("IOStream: No message received from {}!".format(bus))
+                pass
             elif received_msg.arbitration_id == xcp_rx_id:
                 return received_msg
 
@@ -399,13 +419,16 @@ class UpdateValues(threading.Thread):
 
                     if response_message is not None:
                         if response_message.data[0] == 0xFF:
+                            thread_lock.release()
                             # 0xFF means success
                             g_value_updated = True
                             g_value = cmd_download.data[2]
                             logging.debug('Command: DOWNLOAD      Response: Success')
-                            log_info.write("{}  Update {}: {}\n".format(response_message.timestamp,
-                                                                        self.signal_name,
-                                                                        hex(cmd_download.data[2])))
+                            log_to_output.write("{}  Update {}: {}\n".format(
+                                round(response_message.timestamp - start_s, 4),
+                                self.signal_name,
+                                hex(cmd_download.data[2]))
+                            )
                     else:
                         logging.debug('Command: DOWNLOAD      Response: XCP slave response timeout!')
                 elif response_message.data[0] == 0x20:
@@ -414,59 +437,12 @@ class UpdateValues(threading.Thread):
                     logging.debug('Command: SET_MTA       Response: {}'.format(hex(response_message.data[0])))
             else:
                 logging.debug('Command: SET_MTA       Response: XCP slave response timeout!')
-            thread_lock.release()
+            # thread_lock.release()
             sleep(0.5)
             g_value_updated = False
             self.download_data = [0xF0, self.data_size]
 
-        # # Start update for 2nd value
-        # thread_lock.acquire()
-        # cmd_download = can.Message(arbitration_id=0x7e0,
-        #                            data=self.download_data,
-        #                            extended_id=False)
-        # # response_message = None
-        # # while response_message is None:
-        # #     # SET_MTA
-        # #     self.bus.send(set_mta)
-        # #     response_message = self.check_xcp_response(self.bus, slave_id)
-        # self.bus.send(set_mta)
-        # response_message = self.check_xcp_response(self.bus, slave_id)
-        #
-        # if response_message is not None:
-        #     if response_message.data[0] == 0xFF:
-        #         # response indicates command successful
-        #         logging.debug(
-        #             'Command: SET_MTA       Response: Success Address: 0x{}{}{}{}'.format(
-        #                 format(set_mta.data[7], 'x'), format(set_mta.data[6], 'x'),
-        #                 format(set_mta.data[5], 'x'), format(set_mta.data[4], 'x'))
-        #         )
-        #
-        #         # DOWNLOAD
-        #         response_message = None
-        #         while response_message is None:
-        #             # DOWNLOAD
-        #             self.bus.send(cmd_download)
-        #             response_message = self.check_xcp_response(self.bus, slave_id)
-        #
-        #         if response_message is not None:
-        #             if response_message.data[0] == 0xFF:
-        #                 # 0xFF means success
-        #                 g_value_updated = True
-        #                 g_value = cmd_download.data[2]
-        #                 logging.debug('Command: DOWNLOAD      Response: Success')
-        #                 log_info.write("{}  Update {}: {}\n".format(response_message.timestamp,
-        #                                                             self.signal_name,
-        #                                                             hex(cmd_download.data[2])))
-        #         else:
-        #             logging.debug('Command: DOWNLOAD      Response: XCP slave response timeout!')
-        #     elif response_message.data[0] == 0x20:
-        #         logging.debug('Command: SET_MTA       Response: XCP_ERR_CMD_UNKNOWN')
-        #     else:
-        #         logging.debug('Command: SET_MTA       Response: {}'.format(hex(response_message.data[0])))
-        # else:
-        #     logging.debug('Command: SET_MTA       Response: XCP slave response timeout!')
-        # thread_lock.release()
-        # sleep(0.5)
+        # This thread has finished updating the input signal, end the IOStream thread
         g_update_finished = True
 
     @staticmethod
@@ -500,7 +476,7 @@ def main():
     thread1 = IOStream(1, "input", xcp_bus, source_signal, 0x50006814, 0x1, 50)
     thread2 = IOStream(2, "output", xcp_bus, destination_signal, 0x50017f1c, 0x1, 50)
     # def __init__(self, thread_id, name, bus, signal_name, input_address, data_size, update_values[max, min, [any]]):
-    thread3 = UpdateValues(3, "update", xcp_bus, source_signal, 0x50006814, 0x01, [0x01, 0x00])
+    thread3 = UpdateValues(3, "update", xcp_bus, source_signal, 0x50006814, 0x01, [0xFF, 0x00, 0x7F])
 
     # Start new threads
     thread1.start()
@@ -530,6 +506,8 @@ def main():
 
 
 if __name__ == '__main__':
+    start_s = 0.0
+
     test_passed = False
 
     master_id = 0x7E0
@@ -540,20 +518,20 @@ if __name__ == '__main__':
     g_value = 0
     g_input_updated = False
 
-    g_min_check = False
-    g_min_value = 0
-    g_max_check = False
-    g_max_value = 1
-    g_any_check = False
-    g_any_value = 100
+    # g_min_check = False
+    # g_min_value = 0
+    # g_max_check = False
+    # g_max_value = 1
+    # g_any_check = False
+    # g_any_value = 100
     g_timestamp = 0.0
 
-    log_info = open('info.txt', 'w+')
+    log_to_output = open('ACC_Main.txt', 'w+')
 
     thread_lock = threading.Lock()
     threads = []
 
     main()
 
-    log_info.close()
+    log_to_output.close()
 
