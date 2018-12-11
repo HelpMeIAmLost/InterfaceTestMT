@@ -5,12 +5,19 @@ _test.py
 A2LHelper.py
 CANape.INI
 info.txt
+output_*.txt
 *.asc
+*.csv
+*.db
+
 SVS350_Master.a2l
 Xcp_Cfg.h
 edited files/
-ForFunctionVariable.xlsx
+Rowen_ForFunctionVariable.xlsx
 InterfaceTest.py
+SQLCommands.py
+Build/
+DBC/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
