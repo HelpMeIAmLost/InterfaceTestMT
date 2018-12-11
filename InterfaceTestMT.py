@@ -975,6 +975,20 @@ else:
                 destination_data_size = int(destination_signal_info[5])
                 destination_cycle_ms = int(destination_signal_info[7])
                 destination_data_type = destination_signal_info[4]
+                if source_data_type != destination_data_type:
+                    print('{}: Skipped {} -> {} - No tests yet for not matching data types ({} -> {})..'.format(
+                        io_pairing_row[3], io_pairing_row[2],
+                        io_pairing_row[4], source_data_type, destination_data_type), flush=True)
+                    execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
+                                ('Skipped', 'N/A',
+                                 'No tests yet for not matching data types ({} -> {})'.format(
+                                     source_data_type, destination_data_type),
+                                 io_pairing_row[0]))
+                    db_connection.commit()
+                    module_name_o = io_pairing_row[3]
+                    skipped_count += 1
+                    continue
+
                 # if debug and destination_data_type == 'float32':
                 #     print('{}: Skipped {} -> {} - No tests yet for float32 data types..'.format(
                 #         io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]))
