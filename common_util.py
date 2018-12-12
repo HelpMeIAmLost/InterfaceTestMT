@@ -56,14 +56,14 @@ def create_connection(db_file):
     return None
 
 
-def execute_sql(conn, sql_statement, values=None, select=False, count=False, justone=False):
+def execute_sql(conn, sql_statement, values=None, select=False, count=False, just_one=False):
     """ create a table from the create_table_sql statement
     :param conn: SQLite database connection object
     :param sql_statement: SQL statement
     :param values: values to INSERT/UPDATE, in case SQL statement is INSERT/UPDATE request
     :param select: SQL statement is a SELECT statement
     :param count: True if the row count of the SELECT statement will be returned, default is False
-    :param justone: True if the SELECT statement returns only 1 row, default is False
+    :param just_one: True if the SELECT statement returns only 1 row, default is False
     :return: fetchall() rows for SELECT, 0 for success, -1 for locked database, -2 for something else
     """
     try:
@@ -78,7 +78,7 @@ def execute_sql(conn, sql_statement, values=None, select=False, count=False, jus
                         row_count += 1
                     return rows, row_count
                 else:
-                    if justone:
+                    if just_one:
                         return c.fetchone()
                     else:
                         return c.fetchall()
@@ -95,7 +95,7 @@ def execute_sql(conn, sql_statement, values=None, select=False, count=False, jus
                             row_count += 1
                         return rows, row_count
                     else:
-                        if justone:
+                        if just_one:
                             return c.fetchone()
                         else:
                             return c.fetchall()

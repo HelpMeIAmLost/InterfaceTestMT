@@ -13,6 +13,8 @@ import logging
 import threading
 import sys
 
+MIN_PYTHON = (3, 7)
+
 
 class InterfaceTestMT(object):
     def __init__(self, variant, map_folder, dbc_folder):
@@ -211,8 +213,8 @@ class InterfaceTestMT(object):
             #                               can_filters=[{"can_id": 0x7e1, "can_mask": 0x7ef, "extended": False}],
             #                               receive_own_messages=True, bitrate=500000, app_name='InterfaceTest')
             self.bus = can.ThreadSafeBus(bustype='vector', channel=1,
-                                          can_filters=[{"can_id": 0x7e1, "can_mask": 0x7e1, "extended": False}],
-                                          receive_own_messages=True, bitrate=500000, app_name='InterfaceTest')
+                                         can_filters=[{"can_id": 0x7e1, "can_mask": 0x7e1, "extended": False}],
+                                         receive_own_messages=True, bitrate=500000, app_name='CANoe')
             # self.bus3 = can.interface.Bus(bustype='vector', channel=2, bitrate=500000, app_name='InterfaceTest')
             # self.bus4 = can.interface.Bus(bustype='vector', channel=3, bitrate=500000, app_name='InterfaceTest')
 
@@ -285,7 +287,7 @@ class InterfaceTestMT(object):
                 # self.c.execute("SELECT * FROM error_array WHERE error_code=?", (error_code,))
                 # error_info = self.c.fetchone()
                 error_info = execute_sql(self.conn, 'SELECT * FROM error_array WHERE error_code=?',
-                                         (error_code,), select=True, justone=True
+                                         (error_code,), select=True, just_one=True
                                          )
                 if error_info is not None:
                     logging.error('(InterfaceTestMT) Command: {} Response: {} {}'.format(command, error_info[1],
@@ -388,22 +390,14 @@ class IOStream(threading.Thread):
         # The test passed
         global g_test_passed
 
-        # Unused
-        global g_input_response_s
-        global g_input_timeout
-        global g_output_timeout
-
         logging.info(
             "(IOStream) Starting polling thread for {} signal {}...".format(self.name, self.signal_name))
 
         while g_update_finished is False:
             # The request to update the value of the input signal has been sent
             self.bus.send(self.message)
-            ## Start trial
+
             response_message = self.check_xcp_response(self.bus, slave_id)
-            #
-            # g_input_timeout = False
-            # g_output_timeout = False
             if response_message is not None:
                 # PID: RES
                 if response_message.data[0] == 0xFF:
@@ -455,9 +449,11 @@ class IOStream(threading.Thread):
                                     log_to_output.write("Update successful! ")
                                 else:
                                     log_to_output.write("Update failed! ")
-                                log_to_output.write("Expected Update Cycle: {} ms -> Actual Update Cycle: {} ms\n".format(
+                                log_to_output.write(
+                                    "Expected Update Cycle: {} ms -> Actual Update Cycle: {} ms\n".format(
                                         self.cycle,
-                                        round(timestamp_difference_s)))
+                                        round(timestamp_difference_s))
+                                )
                                 # # Reset globals
                                 print("{}  {}: {}".format(
                                     round(g_output_timestamp_s, 4),
@@ -467,43 +463,6 @@ class IOStream(threading.Thread):
                                 )
                                 g_output_updated = True
                                 thread_lock.release()
-            #             # Log to output file
-            #             # log_to_output.write("{}  {}: {}\n".format(response_message.timestamp,
-            #             #                                      self.signal_name,
-            #             #                                      hex(response_message.data[1])))
-            #     # PID: ERR
-            #     elif response_message.data[0] == 0xFE:
-            #         # response indicates error, report error
-            #         error_code = response_message.data[1]
-            #         error_info = execute_sql(self.conn, 'SELECT * FROM error_array WHERE error_code=?',
-            #                                  (error_code,), select=True, justone=True
-            #                                  )
-            #         if error_info is not None:
-            #             log_to_output.write('Error in polling {} signal'.format(self.name))
-            #             logging.error('(IOStream) Command: SHORT_UPLOAD Response: {} {}'.format(
-            #                 error_info[1],
-            #                 error_info[2].strip()))
-            #         else:
-            #             logging.error('(IOStream) Command: SHORT_UPLOAD Response: {}'.format(
-            #                 hex(response_message.data[1])))
-            #     # Error: XCP_ERR_CMD_UNKNOWN
-            #     elif response_message.data[0] == 0x20:
-            #         logging.info('(IOStream) Command: SHORT_UPLOAD Response: XCP_ERR_CMD_UNKNOWN')
-            #     else:
-            #         logging.info('(IOStream) Command: SHORT_UPLOAD Response: {}'.format(hex(response_message.data[0])))
-            # else:
-            #     # log_to_output.write('{}{} signal timeout\n'.format(self.name[0].upper(), self.name[1:]))
-            #     logging.info('(IOStream) XCP slave response timeout! Signal Name: {}'.format(self.signal_name))
-            #     # tries += 1
-            #     # if tries > 9:
-            #     #     if self.name == 'input' and g_value_updated:
-            #     #         g_input_timeout = True
-            #     #     if self.name == 'output' and g_input_updated:
-            #     #         g_output_timeout = True
-            #     #     print('(IOStream) {} timeout!'.format(self.signal_name))
-            #     #     tries = 0
-            #         # break
-            ## End trial
 
             sleep(0.01)
 
@@ -548,8 +507,6 @@ class UpdateValues(threading.Thread):
         global g_value_updated
         global g_expected_value
         global g_update_state
-        global g_input_timeout
-        global g_output_timeout
         global g_input_updated
         global g_input_timestamp_s
         global g_output_updated
@@ -561,8 +518,6 @@ class UpdateValues(threading.Thread):
                               extended_id=False)
 
         for data in self.update_values:
-            # g_input_timeout = False
-            # g_output_timeout = False
             # g_test_passed = False
             if self.data_size == 1:
                 self.download_data.append(data)
@@ -630,76 +585,6 @@ class UpdateValues(threading.Thread):
         thread_lock.acquire()
         g_update_finished = True
         thread_lock.release()
-            ## Start trial
-            #         response_message = self.check_xcp_response(self.bus, slave_id)
-            #
-            #         logging.info('(UpdateValues) Command: SET_MTA Response: Success')
-            #         if response_message is not None:
-            #             if response_message.data[0] == 0xFF:
-            #                 thread_lock.acquire()
-            #                 g_value_updated = True
-            #                 g_expected_value = cmd_download.data[2]
-            #                 logging.info(
-            #                     '(UpdateValues) Command: DOWNLOAD Response: Success Signal Name: {} Address: {} Value: {}'.format(
-            #                         self.signal_name, hex(self.input_address), hex(g_expected_value))
-            #                 )
-            #                 # log_to_output.write("{}  Update {}: {}\n".format(
-            #                 #     round(response_message.timestamp - start_s, 4),
-            #                 #     self.signal_name,
-            #                 #     hex(cmd_download.data[2]))
-            #                 # )
-            #                 thread_lock.release()
-            #                 # Wait until the output signal has been updated
-            #                 while not g_output_updated or not g_input_timeout or not g_output_timeout:
-            #                     pass
-            #                 # Error packet
-            #             elif response_message.data[0] == 0xFE:
-            #                 # response indicates error, report error
-            #                 error_code = response_message.data[1]
-            #                 # self.c.execute("SELECT * FROM error_array WHERE error_code=?", (error_code,))
-            #                 # error_info = self.c.fetchone()
-            #                 error_info = execute_sql(self.conn, 'SELECT * FROM error_array WHERE error_code=?',
-            #                                          (error_code,), select=True, justone=True
-            #                                          )
-            #                 if error_info is not None:
-            #                     logging.error('(UpdateValues) Command: DOWNLOAD Response: {} {}'.format(
-            #                         error_info[1], error_info[2].strip()))
-            #                 else:
-            #                     logging.error('(UpdateValues) Command: DOWNLOAD Response: {}'.format(
-            #                         hex(response_message.data[1])))
-            #             elif response_message.data[0] == 0x20:
-            #                 logging.info('(UpdateValues) Command: DOWNLOAD Response: XCP_ERR_CMD_UNKNOWN')
-            #             else:
-            #                 logging.info(
-            #                     '(UpdateValues) Command: DOWNLOAD Response: {}'.format(hex(response_message.data[0])))
-            #         else:
-            #             # log_to_output.write('Update value timeout for {}'.format(self.signal_name))
-            #             logging.info(
-            #                 '(UpdateValues) Command: DOWNLOAD Response: XCP slave timeout Signal Name: {}'.format(
-            #                     self.signal_name))
-            # else:
-            #     # log_to_output.write('Update value timeout for {}'.format(self.signal_name))
-            #     # if thread_lock.locked():
-            #     #     thread_lock.release()
-            #     logging.info('(UpdateValues) Command: SET_MTA Response: XCP slave timeout Signal Name: {}'.format(
-            #         self.signal_name))
-            #     print('(UpdateValues) Updating the input signal has timed out!')
-            # # Reset globals
-            # g_input_updated = False
-            # g_input_timestamp_s = 0.0
-            # g_output_updated = False
-            # g_output_timestamp_s = 0.0
-            ## End trial
-            # sleep(1)
-            # thread_lock.acquire()
-            # g_value_updated = False
-            # thread_lock.release()
-            # self.download_data = [0xF0, self.data_size]
-
-        # # This thread has finished updating the input signal, end the IOStream thread
-        # thread_lock.acquire()
-        # g_update_finished = True
-        # thread_lock.release()
 
     @staticmethod
     def check_xcp_response(bus, xcp_rx_id):
@@ -716,71 +601,6 @@ class UpdateValues(threading.Thread):
             sys.exit()
 
 
-class LogToTextFile(threading.Thread):
-    def __init__(self, thread_id, name, input_signal, output_signal, cycle):
-        # Thread
-        threading.Thread.__init__(self)
-        self.thread_id = thread_id
-        self.name = name
-        self.input_signal = input_signal
-        self.output_signal = output_signal
-        self.cycle = cycle
-        # Connect to database for error-checking
-        # self.conn = create_connection('interface.db')
-
-    def run(self):
-        # global g_test_passed
-        # global g_input_timestamp_s
-        # global g_output_timestamp_s
-        # global g_value_updated
-        # global g_expected_value
-        # global g_input_updated
-        # global g_output_updated
-        global g_input_timeout
-        global g_output_timeout
-
-        input_logged = False
-        output_logged = False
-
-        while not g_update_finished:
-            if not g_value_updated:
-                input_logged = False
-                output_logged = False
-
-            if g_input_updated and not input_logged:
-                log_to_output.write("{}  {}: {}\n".format(
-                    g_input_timestamp_s,
-                    self.input_signal,
-                    hex(g_expected_value))
-                )
-                input_logged = True
-
-            if g_output_updated and not output_logged:
-                log_to_output.write("{}  {}: {}\n".format(
-                    g_output_timestamp_s,
-                    self.output_signal,
-                    hex(g_expected_value))
-                )
-
-                time_difference_ms = round((g_output_timestamp_s - g_input_timestamp_s) * 1000)
-                if g_test_passed:
-                    log_to_output.write("Update successful! ")
-                else:
-                    log_to_output.write("Update failed! ")
-                log_to_output.write("Expected Update Cycle: {} ms -> Actual Update Cycle: {} ms\n".format(
-                        self.cycle,
-                        time_difference_ms))
-                output_logged = True
-
-            if g_input_timeout:
-                log_to_output.write("Input timeout!")
-                g_input_timeout = False
-            if g_output_timeout:
-                log_to_output.write("Output timeout!")
-                g_output_timeout = False
-                # input_logged = False
-                # output_logged = False
-
 '''
 Way of testing:
     Each module/software component (SWC)'s interface signals will be checked through their input
@@ -791,15 +611,26 @@ Way of testing:
         Procedure:
             Update ACCSelectObj from ACC_Main and check the value of ACCSelectObj in VDC 
 '''
-debug = True
+if sys.version_info < MIN_PYTHON:
+    sys.exit("Python %s.%s or later is required. Please check your Python version.\n" % MIN_PYTHON)
+
+debug = False
 parser = argparse.ArgumentParser()
 if debug:
-    parser.add_argument('-i', dest='variant', help='set to GC7, for debugging purposes', default='GC7')
-    parser.add_argument('-r', dest='retries', help='set to 2, for debugging purposes', default=2)
+    parser.add_argument('-v', dest='variant', help='set to GC7, for debugging', default='GC7')
+    parser.add_argument('-r', dest='retries', help='set to 2, for debugging', default=2)
+    parser.add_argument('-a', dest='update_address', help='set to no, for debugging', default='no')
 else:
-    parser.add_argument("variant", help='variant to be checked', choices=['GC7', 'HR3'])
-parser.add_argument('-m', dest="map_folder", help='path of the MAP file', default='Build/')
-parser.add_argument('-d', dest="dbc_folder", help='path of the DBC folders for each variant', default='DBC/')
+    parser.add_argument("variant", help='variant to be tested', choices=['GC7', 'HR3'])
+    parser.add_argument('-r', dest='retries', help='number of test retries for failed test results, default is 0',
+                        default=0)
+    parser.add_argument('-a', dest='update_address',
+                        help='option to update internal and external signal information, default is yes',
+                        choices=['yes', 'no'],
+                        default='yes')
+parser.add_argument('-m', dest="map_folder", help='path of the MAP file, default is Build/', default='Build/')
+parser.add_argument('-d', dest="dbc_folder", help='path of the DBC folders for each variant, default is DBC/',
+                    default='DBC/')
 args = parser.parse_args()
 
 if not os.path.exists(args.map_folder):
@@ -825,9 +656,9 @@ else:
     elif not dbc_files_found:
         print('DBC files for {} not found in the DBC folder!'.format(args.variant), flush=True)
     else:
-        retries = 0
-        if args.retries is not None:
-            retries = args.retries
+        max_retry = 0
+        if args.retries is not None and args.retries > 0:
+            max_retry = args.retries
         # Update the interface database for interface test
         interface_test = InterfaceTestMT(args.variant, args.map_folder, args.dbc_folder)
         # Update internal signal information
@@ -851,10 +682,6 @@ else:
         master_id = 0x7E0
         slave_id = 0x7E1
 
-        # Start loop here
-        # if debug:
-        #     test_count = 0
-
         # Connect to the XCP slave
         interface_test.connect()
         xcp_bus = interface_test.bus
@@ -863,164 +690,143 @@ else:
                          'uint8': [uint8_info('max'), uint8_info('min'), uint8_info('any')],
                          'float32': [int(float32_info('max', to_hex=True), 16), int(float32_info('min', to_hex=True), 16), int(float32_info('any', to_hex=True), 16)]
                          }
+        IF_test_finished = False
+        retry_count = 0
 
-        if not debug:
+        while not IF_test_finished:
             module_name_o = ''
             log_to_output = None
             first_entry = False
             for io_pairing_row in io_pairing:
                 if module_name_o != io_pairing_row[3]:
-                    if module_name_o != '':
-                        log_to_output.close()
-                        print('Finished tests for {}'.format(module_name_o), flush=True)
-                    print('Starting tests for {}'.format(io_pairing_row[3]), flush=True)
+                    if retry_count == 0:
+                        if module_name_o != '':
+                            log_to_output.close()
+                            print('Finished tests for {}'.format(module_name_o), flush=True)
+                        print('Starting tests for {}'.format(io_pairing_row[3]), flush=True)
+                    else:
+                        if module_name_o != '':
+                            log_to_output.close()
+                            print('Finished re-tests for {}'.format(module_name_o), flush=True)
+                        print('Re-testing failed test items for {}'.format(io_pairing_row[3]), flush=True)
                     first_entry = True
 
-                # For debugging, skip CAN for now
-                if io_pairing_row[1] == 'CAN' or io_pairing_row[3] == 'CAN' or io_pairing_row[1] == 'VP' or \
-                        io_pairing_row[3] == 'VP' or io_pairing_row[3] == 'DebugCAN':
-                    print('{}: Skipped {} -> {} - No tests yet for CAN and VP signals'.format(
-                        io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]), flush=True)
-                    execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
-                                ('Skipped', 'N/A', 'CAN and VP signals not yet being tested', io_pairing_row[0]))
-                    db_connection.commit()
-                    module_name_o = io_pairing_row[3]
-                    skipped_count += 1
-                    continue
-
-                # source_signal = "ACC_Main_ACCSelectObj"
-                # destination_signal = "VDC_ACCSelectObj"
-                # Get details about the source signal
                 source_signal = '{}_{}'.format(io_pairing_row[1], io_pairing_row[2])
-                if source_signal.find('[') != -1:
-                    print('{}: Skipped {} -> {} - No tests yet for arrays, tables and maps'.format(
-                        io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]), flush=True)
-                    execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
-                                ('Skipped', 'N/A', 'Arrays/tables/maps not yet being tested', io_pairing_row[0]))
-                    db_connection.commit()
-                    module_name_o = io_pairing_row[3]
-                    skipped_count += 1
-                    continue
                 source_signal_info = execute_sql(db_connection,
                                                  '''SELECT * FROM internal_signals WHERE link=?''',
                                                  (source_signal,),
-                                                 select=True, justone=True
+                                                 select=True, just_one=True
                                                  )
-                if source_signal_info is None:
-                    print('{}: Skipped {} -> {} - No address found for the source signal'.format(
-                        io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]), flush=True)
-                    execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
-                                ('Skipped', 'N/A', 'No address found for the source signal', io_pairing_row[0]))
-                    db_connection.commit()
-                    module_name_o = io_pairing_row[3]
-                    skipped_count += 1
-                    continue
-                source_address = int(source_signal_info[2])
-                if source_address == 0x0:
-                    print('{}: Skipped {} -> {} - No address found for the source signal'.format(
-                        io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]), flush=True)
-                    execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
-                                ('Skipped', 'N/A', 'No address found for the source signal', io_pairing_row[0]))
-                    db_connection.commit()
-                    module_name_o = io_pairing_row[3]
-                    skipped_count += 1
-                    continue
-                source_data_size = int(source_signal_info[5])
-                source_cycle_ms = int(source_signal_info[7])
-                source_data_type = source_signal_info[4]
-                # if debug and source_data_type == 'float32':
-                #     print('{}: Skipped {} -> {} - No tests yet for float32 data types..'.format(
-                #         io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]))
-                #     execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
-                #                 ('Skipped', 'N/A', 'float32 data types not yet being tested', io_pairing_row[0]))
-                #     db_connection.commit()
-                #     module_name_o = io_pairing_row[3]
-                #     skipped_count += 1
-                #     continue
-
                 destination_signal = '{}_{}'.format(io_pairing_row[3], io_pairing_row[4])
-                if destination_signal.find('[') != -1:
-                    print('{}: Skipped {} -> {} - No tests yet for arrays, tables and maps'.format(
-                        io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]), flush=True)
-                    execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
-                                ('Skipped', 'N/A', 'Arrays/tables/maps not yet being tested', io_pairing_row[0]))
-                    db_connection.commit()
-                    module_name_o = io_pairing_row[3]
-                    skipped_count += 1
-                    continue
                 destination_signal_info = execute_sql(db_connection,
                                                       '''SELECT * FROM internal_signals WHERE link=?''',
                                                       (destination_signal,),
-                                                      select=True, justone=True
+                                                      select=True, just_one=True
                                                       )
-                if destination_signal_info is None:
-                    print('{}: Skipped {} -> {} - No address found for the destination signal'.format(
-                        io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]), flush=True)
-                    execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
-                                ('Skipped', 'N/A', 'No address found for the destination signal', io_pairing_row[0]))
-                    db_connection.commit()
-                    module_name_o = io_pairing_row[3]
-                    skipped_count += 1
-                    continue
+                if retry_count == 0:
+                    # 'Clean' the I/O pairing list
+                    # For debugging, skip CAN for now
+                    if io_pairing_row[1] == 'CAN' or io_pairing_row[3] == 'CAN' or io_pairing_row[1] == 'VP' or \
+                            io_pairing_row[3] == 'VP' or io_pairing_row[3] == 'DebugCAN':
+                        print('{}: Skipped {} -> {} - No tests yet for CAN and VP signals'.format(
+                            io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]), flush=True)
+                        execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
+                                    ('Skipped', 'N/A', 'CAN and VP signals not yet being tested', io_pairing_row[0]))
+                        db_connection.commit()
+                        module_name_o = io_pairing_row[3]
+                        skipped_count += 1
+                        continue
+                    # Skip array, maps and tables for now
+                    if source_signal.find('[') != -1 or destination_signal.find('[') != -1:
+                        print('{}: Skipped {} -> {} - No tests yet for arrays, tables and maps'.format(
+                            io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]), flush=True)
+                        execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
+                                    ('Skipped', 'N/A', 'Arrays/tables/maps not yet being tested', io_pairing_row[0]))
+                        db_connection.commit()
+                        module_name_o = io_pairing_row[3]
+                        skipped_count += 1
+                        continue
+                    # Skip if no information or address is found for the source signal
+                    if source_signal_info is None or int(source_signal_info[2]) == 0x0:
+                        print('{}: Skipped {} -> {} - No address found for the source signal'.format(
+                            io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]), flush=True)
+                        execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
+                                    ('Skipped', 'N/A', 'No address found for the source signal', io_pairing_row[0]))
+                        db_connection.commit()
+                        module_name_o = io_pairing_row[3]
+                        skipped_count += 1
+                        continue
+                    # Skip if no information or address is found for the destination signal
+                    if destination_signal_info is None or int(destination_signal_info[2]) == 0x0:
+                        print('{}: Skipped {} -> {} - No address found for the destination signal'.format(
+                            io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]), flush=True)
+                        execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
+                                    ('Skipped', 'N/A', 'No address found for the destination signal', io_pairing_row[0]))
+                        db_connection.commit()
+                        module_name_o = io_pairing_row[3]
+                        skipped_count += 1
+                        continue
+                    # # Skip float32 data type
+                    # if source_signal_info[4] == 'float32' or destination_signal_info[4] == 'float32':
+                    #     print('{}: Skipped {} -> {} - No tests yet for float32 data types..'.format(
+                    #         io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]))
+                    #     execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
+                    #                 ('Skipped', 'N/A', 'float32 data types not yet being tested', io_pairing_row[0]))
+                    #     db_connection.commit()
+                    #     module_name_o = io_pairing_row[3]
+                    #     skipped_count += 1
+                    #     continue
+                    if source_signal_info[4] != destination_signal_info[4]:
+                        print('{}: Skipped {} -> {} - No tests yet for not matching data types ({} -> {})..'.format(
+                            io_pairing_row[3], io_pairing_row[2],
+                            io_pairing_row[4], source_signal_info[4], destination_signal_info[4]), flush=True)
+                        execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
+                                    ('Skipped', 'N/A',
+                                     'No tests yet for not matching data types ({} -> {})'.format(
+                                         source_signal_info[4], destination_signal_info[4]),
+                                     io_pairing_row[0]))
+                        db_connection.commit()
+                        module_name_o = io_pairing_row[3]
+                        skipped_count += 1
+                        continue
+
+                # Get details about the source signal
+                source_address = int(source_signal_info[2])
+                source_data_size = int(source_signal_info[5])
+                source_cycle_ms = int(source_signal_info[7])
+                source_data_type = source_signal_info[4]
+
+                # Get details about the destination signal
                 destination_address = int(destination_signal_info[2])
-                if destination_address == 0x0:
-                    print('{}: Skipped {} -> {} - No address found for the destination signal'.format(
-                        io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]), flush=True)
-                    execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
-                                ('Skipped', 'N/A', 'No address found for the destination signal', io_pairing_row[0]))
-                    db_connection.commit()
-                    module_name_o = io_pairing_row[3]
-                    skipped_count += 1
-                    continue
                 destination_data_size = int(destination_signal_info[5])
                 destination_cycle_ms = int(destination_signal_info[7])
                 destination_data_type = destination_signal_info[4]
-                if source_data_type != destination_data_type:
-                    print('{}: Skipped {} -> {} - No tests yet for not matching data types ({} -> {})..'.format(
-                        io_pairing_row[3], io_pairing_row[2],
-                        io_pairing_row[4], source_data_type, destination_data_type), flush=True)
-                    execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
-                                ('Skipped', 'N/A',
-                                 'No tests yet for not matching data types ({} -> {})'.format(
-                                     source_data_type, destination_data_type),
-                                 io_pairing_row[0]))
-                    db_connection.commit()
-                    module_name_o = io_pairing_row[3]
-                    skipped_count += 1
-                    continue
-
-                # if debug and destination_data_type == 'float32':
-                #     print('{}: Skipped {} -> {} - No tests yet for float32 data types..'.format(
-                #         io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]))
-                #     execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
-                #                 ('Skipped', 'N/A', 'float32 data types not yet being tested', io_pairing_row[0]))
-                #     db_connection.commit()
-                #     module_name_o = io_pairing_row[3]
-                #     skipped_count += 1
-                #     continue
 
                 # For threading
-                g_test_passed = False
                 g_update_finished = False
                 g_value_updated = False
                 g_expected_value = 0
                 g_input_updated = False
-                g_input_response_s = 0.0
                 g_input_timestamp_s = 0.0
                 g_output_updated = False
                 g_output_timestamp_s = 0.0
+                g_test_passed = False
+
                 thread_lock = threading.Lock()
                 threads = []
 
+                # This iteration is the first entry in the output file
                 if first_entry:
-                    log_to_output = open('output_{}.txt'.format(io_pairing_row[3]), 'w+')
+                    # Create a new one/overwrite an existing one if this iteration is not a re-test
+                    # Otherwise, append to an existing file or create a new one
+                    if retry_count == 0:
+                        log_to_output = open('output_{}.txt'.format(io_pairing_row[3]), 'w+')
+                    else:
+                        log_to_output = open('output_{}.txt'.format(io_pairing_row[3]), 'a+')
                     first_entry = False
 
                 # Create new threads
                 # IOStream(self, thread_id, name, bus, signal_name, signal_address, data_size, cycle):
-                # thread1 = IOStream(1, "input", xcp_bus, source_signal, 0x50006814, 0x1, 50)
-                # thread2 = IOStream(2, "output", xcp_bus, destination_signal, 0x50017f1c, 0x1, 50)
-                print('{}: Testing {} -> {}'.format(io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]), flush=True)
                 thread1 = IOStream(1, "input", xcp_bus, source_signal,
                                    source_address, source_data_size, source_cycle_ms)
                 thread2 = IOStream(2, "output", xcp_bus, destination_signal,
@@ -1030,6 +836,9 @@ else:
                                        source_address, source_data_size, update_values[source_data_type])
 
                 # Start new threads
+                print('{}: Testing {} -> {}'.format(io_pairing_row[3],
+                                                    io_pairing_row[2],
+                                                    io_pairing_row[4]), flush=True)
                 thread1.start()
                 thread2.start()
                 sleep(3)
@@ -1045,162 +854,43 @@ else:
                     t.join()
 
                 if g_test_passed:
-                    # Output to report
+                    # Output to database
                     execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
                                 ('Done', 'Passed', '', io_pairing_row[0]))
                     db_connection.commit()
-                    print("{}: {} -> {} PASSED".format(io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]), flush=True)
+                    print("{}: {} -> {} PASSED".format(io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]),
+                          flush=True)
                     passed_count += 1
                 else:
-                    # Output to report
+                    # Output to database
                     execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
                                 ('Done', 'Failed', 'Please check the output_{}.txt file'.format(io_pairing_row[3]),
                                  io_pairing_row[0]))
                     db_connection.commit()
-                    print("{}: {} -> {} FAILED".format(io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]), flush=True)
+                    print("{}: {} -> {} FAILED".format(io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]),
+                          flush=True)
 
-                # if debug:
-                #     test_count += 1
-                tested_count += 1
+                if retry_count == 0:
+                    tested_count += 1
                 module_name_o = io_pairing_row[3]
-
-                # sleep(3)
-
-                # if debug and test_count == 5:
-                #     break
-                # End loop here
 
             if not first_entry:
                 log_to_output.close()
 
-        # Re-test
-        if retries > 0:
-            first_entry = False
-            log_to_output = None
-            retry_count = 1
-            while retry_count <= retries:
-                print('Running retry {} of {}..'.format(retry_count, retries), flush=True)
-                if io_pairing_count != 0:
+            print('-----------------------------------', flush=True)
+            print('', flush=True)
+            if max_retry > 0:
+                retry_count += 1
+                if retry_count > max_retry:
+                    IF_test_finished = True
+                else:
                     io_pairing = execute_sql(db_connection,
                                              '''SELECT * FROM io_pairing WHERE result='Failed' ORDER BY destination_module;''',
                                              select=True)
-                else:
-                    io_pairing, io_pairing_count = execute_sql(db_connection,
-                                                               '''SELECT * FROM io_pairing WHERE result='Failed' ORDER BY destination_module;''',
-                                                               select=True, count=True)
-                module_name_o = ''
-                for io_pairing_row in io_pairing:
-                    if module_name_o != io_pairing_row[3]:
-                        if module_name_o != '':
-                            log_to_output.close()
-                            print('Finished re-tests for {}'.format(module_name_o), flush=True)
-                        print('Re-testing failed test items for {}'.format(io_pairing_row[3]), flush=True)
-                        first_entry = True
-
-                    # Get details about the source signal
-                    source_signal = '{}_{}'.format(io_pairing_row[1], io_pairing_row[2])
-                    source_signal_info = execute_sql(db_connection,
-                                                     '''SELECT * FROM internal_signals WHERE link=?''',
-                                                     (source_signal,),
-                                                     select=True, justone=True
-                                                     )
-                    source_address = int(source_signal_info[2])
-                    source_data_size = int(source_signal_info[5])
-                    source_cycle_ms = int(source_signal_info[7])
-                    source_data_type = source_signal_info[4]
-
-                    destination_signal = '{}_{}'.format(io_pairing_row[3], io_pairing_row[4])
-                    destination_signal_info = execute_sql(db_connection,
-                                                          '''SELECT * FROM internal_signals WHERE link=?''',
-                                                          (destination_signal,),
-                                                          select=True, justone=True
-                                                          )
-                    destination_address = int(destination_signal_info[2])
-                    destination_data_size = int(destination_signal_info[5])
-                    destination_cycle_ms = int(destination_signal_info[7])
-
-                    # For threading
-                    g_update_finished = False
-                    g_value_updated = False
-                    g_expected_value = 0
-                    g_input_updated = False
-                    g_input_timestamp_s = 0.0
-                    g_output_updated = False
-                    g_output_timestamp_s = 0.0
-                    g_test_passed = False
-                    g_update_state = 0
-
-                    g_input_timeout = False
-                    g_output_timeout = False
-                    g_timestamp = 0.0
-                    thread_lock = threading.Lock()
-                    threads = []
-
-                    # update_values = {'boolean': [1, 0],
-                    #                  'uint8': [uint8_info('max'), uint8_info('min'), uint8_info('any')],
-                    #                  'float32': [float32_info('max'), float32_info('min'), float32_info('any')]
-                    #                  }
-
-                    if first_entry:
-                        log_to_output = open('output_{}.txt'.format(io_pairing_row[3]), 'a+')
-                        first_entry = False
-
-                    # Create new threads
-                    # IOStream(self, thread_id, name, bus, signal_name, signal_address, data_size, cycle):
-                    print('{}: Testing {} -> {}'.format(io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]), flush=True)
-                    thread1 = IOStream(1, "input", xcp_bus, source_signal,
-                                       source_address, source_data_size, source_cycle_ms)
-                    thread2 = IOStream(2, "output", xcp_bus, destination_signal,
-                                       destination_address, destination_data_size, destination_cycle_ms)
-                    # UpdateValues(self, thread_id, name, bus, signal_name, input_address, data_size, update_values[max, min, [any]]):
-                    thread3 = UpdateValues(3, "update", xcp_bus, source_signal,
-                                           source_address, source_data_size, update_values[source_data_type])
-                    # def __init__(self, thread_id, name, input_signal, output_signal, cycle):
-                    # thread4 = LogToTextFile(4, "log", source_signal, destination_signal, destination_cycle_ms)
-
-                    # Start new threads
-                    thread1.start()
-                    thread2.start()
-                    sleep(3)
-                    thread3.start()
-                    # thread4.start()
-
-                    # Add threads to thread list
-                    threads.append(thread1)
-                    threads.append(thread2)
-                    threads.append(thread3)
-                    # threads.append(thread4)
-
-                    # Wait for all threads to complete
-                    for t in threads:
-                        t.join()
-
-                    if g_test_passed:
-                        # Output to report
-                        execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
-                                    ('Done', 'Passed', '', io_pairing_row[0]))
-                        db_connection.commit()
-                        print("{}: {} -> {} PASSED".format(io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]), flush=True)
-                        passed_count += 1
-                    else:
-                        # Output to report
-                        execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
-                                    ('Done', 'Failed', 'Please check the output_{}.txt file'.format(io_pairing_row[3]),
-                                     io_pairing_row[0]))
-                        db_connection.commit()
-                        print("{}: {} -> {} FAILED".format(io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]), flush=True)
-
-                    # if debug:
-                    #     test_count += 1
-                    # tested_count += 1
-                    module_name_o = io_pairing_row[3]
-
-                    retry_count += 1
-
-                    sleep(0.5)
-
-            if not first_entry:
-                log_to_output.close()
+                    print('The script is set to re-test failed test items {} time(s)'.format(max_retry), flush=True)
+                    print('Running retry {} of {}..'.format(retry_count, max_retry), flush=True)
+            else:
+                IF_test_finished = True
 
         db_connection.close()
         # Disconnect from XCP slave
@@ -1208,12 +898,16 @@ else:
         # End logging (ASC and info)
         interface_test.end_logging()
 
+        print('', flush=True)
         print('Done!', flush=True)
         print('', flush=True)
         print('Test Results', flush=True)
         print('-----------------------------------', flush=True)
         print('{} of {} items tested'.format(tested_count, io_pairing_count), flush=True)
-        print('{} Passed'.format(passed_count) + ', including re-tests' if retries is not None and retries > 0 else '', flush=True)
+        print('{} Passed'.format(passed_count) +
+              ', including {} re-tests'.format(max_retry) if max_retry > 0 else '',
+              flush=True)
         print('{} Failed'.format(tested_count - passed_count) +
-              ', including {} re-tests'.format(retries) if retries is not None and retries > 0 else '', flush=True)
+              ', including {} re-tests'.format(max_retry) if max_retry > 0 else '',
+              flush=True)
         print('{} Skipped'.format(skipped_count), flush=True)
