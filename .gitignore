@@ -1,6 +1,5 @@
 # PyCharm-related / others
 .idea/
-.idea/inspectionProfiles
 _test.py
 A2LHelper.py
 CANape.INI
@@ -9,7 +8,6 @@ output_*.txt
 *.asc
 *.csv
 *.db
-
 SVS350_Master.a2l
 Xcp_Cfg.h
 edited files/
