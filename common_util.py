@@ -12,6 +12,40 @@ OFF = 0
 ON = 1
 
 
+def data_type_info(data_type):
+    any_value = None
+    if data_type == np.uint8:
+        any_value = 0x7F
+    elif data_type == np.uint16:
+        any_value = 0x7FFF
+    elif data_type == np.uint32:
+        any_value = 0x7FFFFFFF
+    elif data_type == np.int8:
+        any_value = -64
+    elif data_type == np.int16:
+        any_value = -16384
+    elif data_type == np.int32:
+        any_value = -1073741824
+
+    if data_type == np.float32:
+        return [
+            int(float_to_hex(np.finfo(np.float32).max), 16),
+            int(float_to_hex(np.finfo(np.float32).min), 16),
+            int(float_to_hex(1.23456789), 16)
+                ]
+    else:
+        return [np.iinfo(data_type).max, np.iinfo(data_type).min, any_value]
+
+
+def raw_to_physical(raw_value, lsb, offset):
+    return (raw_value * lsb) + offset
+
+
+def physical_to_raw(physical_value, lsb, offset):
+    return int(((physical_value / lsb) - offset) + 0.5) \
+        if physical_value >= 0 else int(((physical_value / lsb) - offset) - 0.5)
+
+
 def uint8_info(limit):
     if limit == 'min':
         return np.iinfo(np.uint8).min
@@ -104,13 +138,12 @@ def execute_sql(conn, sql_statement, values=None, select=False, count=False, jus
                             return c.fetchall()
         return 0
     except Error as e:
-        if e.__str__().find('UNIQUE constraint failed:') == -1:
-            print(e, values if values is not None else None)
+        if e.__str__().find('UNIQUE constraint failed:') != -1:
+            return -2
         elif e.__str__() == 'database is locked':
             return -1
         else:
-            print(e)
-            return -2
+            print(e, values if values is not None else None)
 
 
 def commit_disconnect_database(conn):
@@ -176,7 +209,7 @@ def insert_lines_of_code(section, filename, data_frame, string, skip_count, spac
     :param data_frame: filtered data frame for the current module
     :param string: a line in the stub that indicates the declarations section of the file
     :param skip_count: number of lines to skip from the section header's identifying string
-    :param spaces:
+    :param spaces: spacer for the line of code
     :return: return True if updating the file is a success, otherwise, return False
     """
     line_number = find_section_header(filename, string, skip_count)
@@ -204,6 +237,7 @@ def insert_lines_of_code(section, filename, data_frame, string, skip_count, spac
                                     (cycle_ms, module_name)
                                     )
                         commit_disconnect_database(conn)
+                    # Create a list of RTE APIs
                     if section == 'functions':
                         if line == ' * Input Interfaces:\n':
                             rte_api_list_found = True
@@ -215,30 +249,57 @@ def insert_lines_of_code(section, filename, data_frame, string, skip_count, spac
                     fo.write(line)
                     current_line += 1
 
+                    if current_line == (line_number if module_name != 'ACC_Main' and module_name != 'ACC_50ms'
+                                        else (line_number - 3)) and section == 'functions':
+                        data = data_frame.tolist()
+                        temp_declaration_found = False
+                        for row in data:
+                            # Insert declarations of temporary variables first
+                            if str(row).find('Rte_Write_PP_') == -1 and \
+                                    str(row).find('Rte_Read_RP_') == -1 and \
+                                    str(row).find(' = ') == -1:
+                                if row == 'sint16 t_TargetInfo_VRefDist;':
+                                    fo.write('{}// {}\n'.format(spaces, row))
+                                else:
+                                    fo.write('{}{}\n'.format(spaces, row))
+                                temp_declaration_found = True
+                        if temp_declaration_found:
+                            fo.write('\n')
+
                     if current_line == line_number:
                         data = data_frame.tolist()
                         for row in data:
                             if section == 'declarations':
-                                fo.write('{}{}\n'.format(spaces, row))
+                                if row == 'float32 FC_Common_EPB_OperationStats;' or \
+                                        row == 'float32 PreCAN_EPB_OperationStats;' or \
+                                        row == 'float32 Input_SAS_f_SASStopLearn;':
+                                    fo.write('{}// {}\n'.format(spaces, row))
+                                else:
+                                    fo.write('{}{}\n'.format(spaces, row))
                             else:
-                                function_name = str(row).split('(')[0]
                                 rte_api_found = False
-                                # Check if the function call to be inserted is in the list of RTE APIs
-                                for rte_api_function in rte_api_list:
-                                    if rte_api_function == function_name:
-                                        rte_api_found = True
-                                        break
+                                if str(row).find('Rte_Write_PP_') != -1 or str(row).find('Rte_Read_RP_') != -1:
+                                    function_name = str(row).split('(')[0]
+                                    # Check if the function call to be inserted is in the list of RTE APIs
+                                    for rte_api_function in rte_api_list:
+                                        if rte_api_function == function_name:
+                                            rte_api_found = True
+                                            break
+                                elif str(row).find(' = ') != -1:
+                                    rte_api_found = True
+                                else:
+                                    continue
+
                                 if rte_api_found:
                                     fo.write('{}{}\n'.format(spaces, row))
                                 else:
                                     fo.write('{}// {}\n'.format(spaces, row))
-                                    continue
             fo.close()
         fi.close()
         os.remove('{}.tmp'.format(filename))
         return True
     elif line_number == -1:
-        print('Declarations section of {} is not empty'.format(filename))
+        print('{}{} section of {} is not empty'.format(str(section[:1]).upper(), section[1:], filename))
         return False
     else:
         print('Section header in {} not found'.format(filename))

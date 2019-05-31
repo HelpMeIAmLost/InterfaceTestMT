@@ -12,6 +12,7 @@ import time
 import logging
 import threading
 import sys
+import numpy as np
 
 MIN_PYTHON = (3, 7)
 
@@ -24,10 +25,28 @@ class InterfaceTestMT(object):
         # Connect to database for error-checking
         self.conn = create_connection('interface.db')
         # self.c = self.conn.cursor()
+        # For XCP
         self.bus = None
+        # For CAN
+        self.bus1 = None
+        self.bus2 = None
+        self.bus3 = None
+        self.bus4 = None
         self.can_log = None
         self.asc_writer = None
         self.notifier = None
+        self.can1_log = None
+        self.can1_asc_writer = None
+        self.can1_notifier = None
+        self.can2_log = None
+        self.can2_asc_writer = None
+        self.can2_notifier = None
+        self.can3_log = None
+        self.can3_asc_writer = None
+        self.can3_notifier = None
+        self.can4_log = None
+        self.can4_asc_writer = None
+        self.can4_notifier = None
 
         # configure logging settings
         logging.basicConfig(filename='run.log',
@@ -36,7 +55,6 @@ class InterfaceTestMT(object):
                             format=' %(asctime)s - %(levelname)s - %(message)s')
 
     def update_internal_signals(self):
-        # conn = create_connection('interface.db')
         internal_signal_address_count = 0
         if self.conn is not None:
             print('Updating the internal_signals table of the interface database..', flush=True)
@@ -64,13 +82,14 @@ class InterfaceTestMT(object):
                                     internal_signal_name = row[0]
                                     internal_signal_address = int(temp_line[3], 16)
                                     result = execute_sql(self.conn, sql_update_internal_signal,
-                                                (internal_signal_address, internal_signal_name))
+                                                         (internal_signal_address, internal_signal_name)
+                                                         )
                                     if result < 0:
                                         return result
                                     internal_signal_address_count += 1
                                     break
                 fp.close()
-            # commit_disconnect_database(self.conn)
+
             self.conn.commit()
             print('Done!', flush=True)
             print('{} of {} signal addresses were updated'.format(internal_signal_address_count,
@@ -81,7 +100,6 @@ class InterfaceTestMT(object):
         return internal_signal_address_count
 
     def update_external_signals(self):
-        # conn = create_connection('interface.db')
         external_signal_address_count = 0
         if self.conn is not None:
             print('Updating the external_signals table of the interface database..')
@@ -117,7 +135,7 @@ class InterfaceTestMT(object):
                             break
                     # if not signal_found:
                     #     print('{} not found'.format(row[0]))
-                else: # VP
+                else:
                     signal_found, signal_attributes = self.search_signal_in_dbc(row[0], self.variant,
                                                                                 self.dbc_folder, 'IPC')
                 if signal_found:
@@ -206,9 +224,14 @@ class InterfaceTestMT(object):
         global start_s
 
         try:
-            # self.bus1 = can.interface.Bus(bustype='vector', channel=0, bitrate=500000, app_name='InterfaceTest')
-            # self.bus2 = can.interface.Bus(bustype='vector', channel=1, receive_own_messages=True, bitrate=500000,
-            #                               app_name='InterfaceTest')
+            self.bus1 = can.ThreadSafeBus(bustype='vector', channel=0, receive_own_messages=False, bitrate=500000,
+                                          app_name='CANoe')
+            self.bus2 = can.ThreadSafeBus(bustype='vector', channel=1, receive_own_messages=False, bitrate=500000,
+                                          app_name='CANoe')
+            self.bus3 = can.ThreadSafeBus(bustype='vector', channel=2, receive_own_messages=False, bitrate=500000,
+                                          app_name='CANoe')
+            self.bus4 = can.ThreadSafeBus(bustype='vector', channel=3, receive_own_messages=False, bitrate=500000,
+                                          app_name='CANoe')
             # self.bus2 = can.interface.Bus(bustype='vector', channel=1,
             #                               can_filters=[{"can_id": 0x7e1, "can_mask": 0x7ef, "extended": False}],
             #                               receive_own_messages=True, bitrate=500000, app_name='InterfaceTest')
@@ -229,14 +252,27 @@ class InterfaceTestMT(object):
             sys.exit()
 
         # CAN logger
-        self.can_log = open('log.asc', 'w+')
-        self.asc_writer = can.ASCWriter('log.asc')
+        self.can_log = open('XCP.asc', 'w+')
+        self.asc_writer = can.ASCWriter('XCP.asc')
         self.notifier = can.Notifier(self.bus, [self.asc_writer])
+        self.can1_log = open('CAN1.asc', 'w+')
+        self.can1_asc_writer = can.ASCWriter('CAN1.asc')
+        self.can1_notifier = can.Notifier(self.bus1, [self.can1_asc_writer])
+        self.can2_log = open('CAN2.asc', 'w+')
+        self.can2_asc_writer = can.ASCWriter('CAN2.asc')
+        self.can2_notifier = can.Notifier(self.bus2, [self.can2_asc_writer])
+        self.can3_log = open('CAN3.asc', 'w+')
+        self.can3_asc_writer = can.ASCWriter('CAN3.asc')
+        self.can3_notifier = can.Notifier(self.bus3, [self.can3_asc_writer])
+        self.can4_log = open('CAN4.asc', 'w+')
+        self.can4_asc_writer = can.ASCWriter('CAN4.asc')
+        self.can4_notifier = can.Notifier(self.bus4, [self.can4_asc_writer])
         # self.notifier.add_bus(self.bus1)
         # self.notifier.add_bus(self.bus3)
         # self.notifier.add_bus(self.bus4)
 
         logging.info("(InterfaceTestMT) Connecting to XCP slave..")
+        print('Connecting to XCP slave..', flush=True)
         msg = can.Message(arbitration_id=master_id,
                           data=[0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
                           extended_id=False)
@@ -252,8 +288,10 @@ class InterfaceTestMT(object):
         while response_message is None and tries < 10:
             if msg.data[0] == 0xFF:
                 logging.info("(InterfaceTestMT) XCP slave connect retry {}".format(tries))
+                print('Failed connecting to the XCP slave! Connect retry #{}'.format(tries + 1), flush=True)
             elif msg.data[0] == 0xFE:
                 logging.info("(InterfaceTestMT) XCP slave disconnect retry {}".format(tries))
+                print('Failed disconnecting from the XCP slave! Disconnect retry #{}'.format(tries + 1), flush=True)
             bus.send(msg)
             response_message = self.check_xcp_response(bus, slave_id)
             tries += 1
@@ -314,8 +352,16 @@ class InterfaceTestMT(object):
         self.conn.close()
         logging.info('(InterfaceTestMT) Closed SQLite3 database connection')
         self.notifier.stop()
+        self.can1_notifier.stop()
+        self.can2_notifier.stop()
+        self.can3_notifier.stop()
+        self.can4_notifier.stop()
         logging.info('(InterfaceTestMT) Stopped CAN bus notifier')
         self.asc_writer.stop()
+        self.can1_asc_writer.stop()
+        self.can2_asc_writer.stop()
+        self.can3_asc_writer.stop()
+        self.can4_asc_writer.stop()
         logging.info('(InterfaceTestMT) Stopped ASCWriter')
 
         msg = can.Message(arbitration_id=master_id,
@@ -323,6 +369,10 @@ class InterfaceTestMT(object):
                           extended_id=False)
         self.send_once(bus, msg)
         bus.shutdown()
+        self.bus1.shutdown()
+        self.bus2.shutdown()
+        self.bus3.shutdown()
+        self.bus4.shutdown()
         logging.info('(InterfaceTestMT) Shut down CAN bus')
 
     @staticmethod
@@ -340,22 +390,197 @@ class InterfaceTestMT(object):
             sys.exit()
 
 
-class IOStream(threading.Thread):
-    def __init__(self, thread_id, name, bus, signal_name, signal_address, data_size, cycle):
+class UpdateTimeout(threading.Thread):
+    def __init__(self, thread_id, name, duration_s):
+        # Thread
+        threading.Thread.__init__(self)
+        self.thread_id = thread_id
+        self.name = name
+        self.duration = duration_s
+
+    def run(self):
+        # The updating of input values is finished
+        global g_input_updated
+        global g_output_updated
+
+        timeout_ms = 0
+
+        while not g_update_finished:
+            # Start the timer
+            if g_input_updated:
+                sleep(0.001)
+                timeout_ms += 1
+            else:
+                timeout_ms = 0
+
+            if timeout_ms == (self.duration * 1000):
+                print('Timer: {}'.format(time.time() - start_s))
+                thread_lock.acquire()
+                g_output_updated = True
+                log_to_output.write("{}  Output signal update failed!\n".format(round(g_input_timestamp_s + 1, 4)))
+                thread_lock.release()
+
+                print("{}  Output signal update failed!".format(round(g_input_timestamp_s + 1, 4)), flush=True)
+
+
+class ApplicationIOStream(threading.Thread):
+    def __init__(self, thread_id, name, bus, signal):
         # Thread
         threading.Thread.__init__(self)
         self.thread_id = thread_id
         self.name = name
         self.bus = bus
-        self.signal_name = signal_name
-        self.data_size = data_size
+        self.signal_name = signal['signal']
+        self.data_size = signal['data_size']
         self.message = can.Message(arbitration_id=master_id, data=[0xF4, self.data_size, 0x0, 0x0,
-                                                                   signal_address & 0xFF,
-                                                                   (signal_address >> 8) & 0xFF,
-                                                                   (signal_address >> 16) & 0xFF,
-                                                                   (signal_address >> 24) & 0xFF],
+                                                                   signal['address'] & 0xFF,
+                                                                   (signal['address'] >> 8) & 0xFF,
+                                                                   (signal['address'] >> 16) & 0xFF,
+                                                                   (signal['address'] >> 24) & 0xFF],
                                    extended_id=False)
-        self.cycle = cycle
+        self.cycle = signal['cycle_ms']
+        # Connect to database for error-checking
+        self.conn = create_connection('interface.db')
+
+        # configure logging settings
+        logging.basicConfig(filename='run.log', level=logging.INFO, format=' %(asctime)s - %(levelname)s - %(message)s')
+
+    def run(self):
+        global g_update_finished
+        global g_value_updated
+        global g_expected_value
+        global g_input_updated
+        global g_input_timestamp_s
+        global g_output_updated
+        global g_output_timestamp_s
+        global g_test_passed
+        global g_output_timeout_counter
+
+        logging.info(
+            "(ApplicationIOStream) Starting polling thread for {} signal {}...".format(self.name, self.signal_name))
+
+        while not g_update_finished:
+            # The request to update the value of the input signal has been sent
+            self.bus.send(self.message)
+
+            response_message = self.check_xcp_response(self.bus, slave_id)
+            if response_message is not None:
+                # PID: RES
+                if response_message.data[0] == 0xFF:
+                    if g_value_updated and \
+                            ((self.name == "input" and not g_input_updated) or
+                             (self.name == "output" and g_input_updated and not g_output_updated)):
+                        # The input/output signal has been updated, check if they are equal to the requested value
+                        actual_value = response_message.data[1]
+                        if self.data_size == 2:
+                            actual_value = (actual_value << 8) | response_message.data[2]
+                        elif self.data_size == 4:
+                            actual_value = (actual_value << 8) | response_message.data[2]
+                            actual_value = (actual_value << 8) | response_message.data[3]
+                            actual_value = (actual_value << 8) | response_message.data[4]
+                        if actual_value == g_expected_value:
+                            if self.name == "input" and not g_input_updated:
+                                # print('In: {}'.format(time.time() - start_s))
+                                g_output_timeout_counter = 0
+                                thread_lock.acquire()
+                                # Input signal update timestamp relative to start of execution, not current time
+                                g_input_timestamp_s = response_message.timestamp - start_s
+                                g_input_updated = True
+                                thread_lock.release()
+                                # Log to output file
+                                actual_value = hex(actual_value)
+                                if self.data_size == 4:
+                                    actual_value = hex_to_float(actual_value)
+                                    # if actual_value == '0x0':
+                                    #     actual_value = 0.0
+                                    # else:
+                                    #     actual_value = hex_to_float(actual_value)
+                                log_to_output.write("{}  {}: {}\n".format(round(g_input_timestamp_s, 4),
+                                                                          self.signal_name,
+                                                                          actual_value))
+                                print("{}  {}: {}".format(
+                                    round(g_input_timestamp_s, 4),
+                                    self.signal_name,
+                                    actual_value,
+                                    flush=True)
+                                )
+                            elif self.name == "output" and g_input_updated and not g_output_updated:
+                                # print('Out: {}'.format(time.time() - start_s))
+                                thread_lock.acquire()
+                                g_output_timestamp_s = response_message.timestamp - start_s
+                                timestamp_difference_s = abs(g_output_timestamp_s - g_input_timestamp_s) * 1000
+                                if timestamp_difference_s <= self.cycle:
+                                    g_test_passed |= True
+                                else:
+                                    g_test_passed |= False
+                                    # thread_lock.release()
+                                actual_value = hex(actual_value)
+                                if self.data_size == 4:
+                                    actual_value = hex_to_float(actual_value)
+                                log_to_output.write("{}  {}: {}\n".format(round(g_output_timestamp_s, 4),
+                                                                          self.signal_name,
+                                                                          actual_value))
+                                if g_test_passed:
+                                    log_to_output.write("Update successful! ")
+                                else:
+                                    log_to_output.write("Update failed! ")
+                                log_to_output.write(
+                                    "Expected Update Cycle: {} ms -> Actual Update Cycle: {} ms\n".format(
+                                        self.cycle,
+                                        round(timestamp_difference_s))
+                                )
+                                print("{}  {}: {}".format(
+                                    round(g_output_timestamp_s, 4),
+                                    self.signal_name,
+                                    actual_value,
+                                    flush=True)
+                                )
+                                g_output_updated = True
+                                g_output_timeout_counter = 0
+                                thread_lock.release()
+                        else:
+                            if self.name == 'output' and g_input_updated:
+                                g_output_timeout_counter += 1
+
+                            if g_output_timeout_counter == 10:
+                                current_time = response_message.timestamp - start_s
+                                thread_lock.acquire()
+                                log_to_output.write(
+                                    "{}  Output signal update failed!\n".format(round(current_time, 4))
+                                )
+                                g_output_updated = True
+                                g_output_timeout_counter = 0
+                                thread_lock.release()
+
+                                print("{}  Output signal update failed!".format(round(current_time, 4)), flush=True)
+
+            sleep(0.01)
+
+        logging.info("(ApplicationIOStream) Exiting {} polling thread for {}".format(self.name, self.signal_name))
+
+    @staticmethod
+    def check_xcp_response(bus, xcp_rx_id):
+        try:
+            # Set timeout for response message
+            received_msg = bus.recv(0.05)
+            if received_msg is not None:
+                if received_msg.arbitration_id == xcp_rx_id:
+                    return received_msg
+
+        except can.CanError as message:
+            # logging.error(message)
+            print(message, flush=True)
+            sys.exit()
+
+
+class CANIOStream(threading.Thread):
+    def __init__(self, thread_id, name, bus, signal_info):
+        # Thread
+        threading.Thread.__init__(self)
+        self.thread_id = thread_id
+        self.name = name
+        self.bus = bus
+        self.signal_info = signal_info
         # Connect to database for error-checking
         self.conn = create_connection('interface.db')
 
@@ -389,116 +614,156 @@ class IOStream(threading.Thread):
         global g_output_timestamp_s
         # The test passed
         global g_test_passed
+        # Initial value of the signal
+        global g_initial_value
 
         logging.info(
-            "(IOStream) Starting polling thread for {} signal {}...".format(self.name, self.signal_name))
+            "(CANIOStream) Starting polling thread for {} signal {}...".format(self.name, self.signal_info['signal']))
 
         while g_update_finished is False:
             # The request to update the value of the input signal has been sent
-            self.bus.send(self.message)
+            received_msg = self.bus.recv()
+            if received_msg is not None:
+                if received_msg.arbitration_id == self.signal_info['can_id']:
+                    actual_value = 0
+                    # Get the correct byte number, bit number and bit length
+                    current_bit = 0
+                    byte_number = self.signal_info['byte']
+                    bit_number = self.signal_info['bit']
+                    bit_length = self.signal_info['length']
+                    # Read the number of bits for the signal, output is raw value
+                    while bit_length > 0:
+                        actual_value = actual_value | (
+                                ((received_msg.data[byte_number] & (0x1 << bit_number)) >> bit_number) << current_bit)
+                        bit_length -= 1
+                        bit_number += 1
+                        if bit_number == 8:
+                            bit_number = 0
+                            byte_number += 1
+                        current_bit += 1
 
-            response_message = self.check_xcp_response(self.bus, slave_id)
-            if response_message is not None:
-                # PID: RES
-                if response_message.data[0] == 0xFF:
+                    # # Convert the raw value to physical value
+                    # actual_value = (actual_value * self.signal_info['factor']) + self.signal_info['offset']
+
+                    # Get the initial value of the CAN signal
+                    if g_initial_value is None:
+                        g_initial_value = actual_value
+
                     if g_value_updated:
                         # The input/output signal has been updated, check if they are equal to the requested value
-                        actual_value = response_message.data[1]
-                        if self.data_size == 2:
-                            actual_value = (actual_value << 8) | response_message.data[2]
-                        elif self.data_size == 4:
-                            actual_value = (actual_value << 8) | response_message.data[2]
-                            actual_value = (actual_value << 8) | response_message.data[3]
-                            actual_value = (actual_value << 8) | response_message.data[4]
+                        # Get the correct byte number, bit number and bit length
+                        # actual_value = 0
+                        # current_bit = 0
+                        # byte_number = self.signal_info['byte']
+                        # bit_number = self.signal_info['bit']
+                        # bit_length = self.signal_info['length']
+                        # Read the number of bits for the signal
+                        # while bit_length > 0:
+                        #     actual_value = actual_value | (
+                        #         ((received_msg.data[byte_number] & (0x1 << bit_number)) >> bit_number) << current_bit)
+                        #     bit_length -= 1
+                        #     bit_number += 1
+                        #     if bit_number == 8:
+                        #         bit_number = 0
+                        #         byte_number += 1
+                        #     current_bit += 1
+                        #
+                        # actual_value = (actual_value * self.signal_info['factor']) + self.signal_info['offset']
+
+                        # Convert the value to raw value before comparing it to the expected value
+                        if self.signal_info['data_type'] == 'float':
+                            actual_value = int(float_to_hex(actual_value), 16)
+
                         if actual_value == g_expected_value:
                             if self.name == "input" and not g_input_updated:
+                                # print('In: {}'.format(time.time() - start_s))
                                 thread_lock.acquire()
                                 # Input signal update timestamp relative to start of execution, not current time
-                                g_input_timestamp_s = response_message.timestamp - start_s
+                                g_input_timestamp_s = received_msg.timestamp - start_s
                                 g_input_updated = True
                                 thread_lock.release()
                                 # Log to output file
                                 actual_value = hex(actual_value)
-                                if self.data_size == 4:
-                                    actual_value = hex_to_float(actual_value)
+                                # if self.data_size == 4:
+                                #     actual_value = hex_to_float(actual_value)
                                 log_to_output.write("{}  {}: {}\n".format(round(g_input_timestamp_s, 4),
-                                                                          self.signal_name,
+                                                                          self.signal_info['signal'],
                                                                           actual_value))
                                 print("{}  {}: {}".format(
                                     round(g_input_timestamp_s, 4),
-                                    self.signal_name,
+                                    self.signal_info['signal'],
                                     actual_value,
                                     flush=True)
                                 )
                             elif self.name == "output" and g_input_updated and not g_output_updated:
+                                # print('Out: {}'.format(time.time() - start_s))
                                 thread_lock.acquire()
-                                g_output_timestamp_s = response_message.timestamp - start_s
-                                timestamp_difference_s = abs(g_output_timestamp_s - g_input_timestamp_s) * 1000
-                                if timestamp_difference_s <= self.cycle:
-                                    g_test_passed |= True
-                                else:
-                                    g_test_passed |= False
-                                    # thread_lock.release()
-                                actual_value = hex(actual_value)
-                                if self.data_size == 4:
-                                    actual_value = hex_to_float(actual_value)
-                                log_to_output.write("{}  {}: {}\n".format(round(g_output_timestamp_s, 4),
-                                                                          self.signal_name,
-                                                                          actual_value))
-                                if g_test_passed:
-                                    log_to_output.write("Update successful! ")
-                                else:
-                                    log_to_output.write("Update failed! ")
-                                log_to_output.write(
-                                    "Expected Update Cycle: {} ms -> Actual Update Cycle: {} ms\n".format(
-                                        self.cycle,
-                                        round(timestamp_difference_s))
-                                )
-                                # # Reset globals
-                                print("{}  {}: {}".format(
-                                    round(g_output_timestamp_s, 4),
-                                    self.signal_name,
-                                    actual_value,
-                                    flush=True)
-                                )
-                                g_output_updated = True
+                                g_output_timestamp_s = received_msg.timestamp - start_s
+                                if g_output_timestamp_s >= g_input_timestamp_s:
+                                    timestamp_difference_s = abs(g_output_timestamp_s - g_input_timestamp_s) * 1000
+                                    if timestamp_difference_s <= self.signal_info['cycle_ms']:
+                                        g_test_passed |= True
+                                    else:
+                                        g_test_passed |= False
+                                        # thread_lock.release()
+                                    # actual_value = hex(actual_value)
+                                    log_to_output.write("{}  {}: {}\n".format(round(g_output_timestamp_s, 4),
+                                                                              self.signal_info['signal'],
+                                                                              hex(actual_value)))
+                                    if g_test_passed:
+                                        log_to_output.write("Update successful! ")
+                                    else:
+                                        log_to_output.write("Update failed! ")
+                                    log_to_output.write(
+                                        "Expected Update Cycle: {} ms -> Actual Update Cycle: {} ms\n".format(
+                                            self.signal_info['cycle_ms'],
+                                            round(timestamp_difference_s))
+                                    )
+                                    g_output_updated = True
+                                    print("{}  {}: {}".format(
+                                        round(g_output_timestamp_s, 4),
+                                        self.signal_info['signal'],
+                                        hex(actual_value),
+                                        flush=True)
+                                    )
                                 thread_lock.release()
+                        # else:
+                        #     if self.name == "output" and g_input_updated and not g_output_updated:
+                        #         g_output_timestamp_s = received_msg.timestamp - start_s
+                        #         thread_lock.acquire()
+                        #         g_test_passed &= False
+                        #         log_to_output.write("Update failed! ")
+                        #         log_to_output.write("The output signal failed to update!\n")
+                        #         g_output_updated = True
+                        #         thread_lock.release()
+                        #         print("{}  {}: {}".format(
+                        #             round(g_output_timestamp_s, 4),
+                        #             self.signal_info['signal'],
+                        #             hex(actual_value),
+                        #             flush=True)
+                        #         )
 
-            sleep(0.01)
+            # sleep(0.001)
 
-        logging.info("(IOStream) Exiting {} polling thread for {}".format(self.name, self.signal_name))
-
-    @staticmethod
-    def check_xcp_response(bus, xcp_rx_id):
-        try:
-            # Set timeout for response message
-            received_msg = bus.recv(0.05)
-            if received_msg is not None:
-                if received_msg.arbitration_id == xcp_rx_id:
-                    return received_msg
-
-        except can.CanError as message:
-            # logging.error(message)
-            print(message, flush=True)
-            sys.exit()
+        logging.info("(CANIOStream) Exiting {} polling thread for {}".format(self.name, self.signal_info['signal']))
 
 
 class UpdateValues(threading.Thread):
-    def __init__(self, thread_id, name, bus, signal_name, input_address, data_size, update_values):
+    def __init__(self, thread_id, name, bus, signal, values):
         # Thread
         threading.Thread.__init__(self)
         self.thread_id = thread_id
         self.name = name
         self.bus = bus
-        self.signal_name = signal_name
-        self.input_address = input_address
+        self.signal_name = signal['signal']
+        self.input_address = signal['address']
         self.mta_data = [0xF6, 0x00, 0x00, 0x00,
-                         input_address & 0xFF,
-                         (input_address >> 8) & 0xFF,
-                         (input_address >> 16) & 0xFF,
-                         (input_address >> 24) & 0xFF]
-        self.data_size = data_size
-        self.update_values = update_values
+                         self.input_address & 0xFF,
+                         (self.input_address >> 8) & 0xFF,
+                         (self.input_address >> 16) & 0xFF,
+                         (self.input_address >> 24) & 0xFF]
+        self.data_size = signal['data_size']
+        self.update_values = values
         self.download_data = [0xF0, self.data_size]
         self.conn = create_connection('interface.db')
 
@@ -506,21 +771,31 @@ class UpdateValues(threading.Thread):
         global g_update_finished
         global g_value_updated
         global g_expected_value
-        global g_update_state
         global g_input_updated
         global g_input_timestamp_s
         global g_output_updated
         global g_output_timestamp_s
         global g_test_passed
+        # global g_initial_value
+        # global g_destination_can
 
         set_mta = can.Message(arbitration_id=master_id,
                               data=self.mta_data,
                               extended_id=False)
 
+        if g_destination_can:
+            # g_initial_value is only updated by the CANIOStream thread
+            # Check if it changed and it's equal to the first value in the update_values list (usually max value)
+            # Rearrange the list if true
+            if g_initial_value is not None and g_initial_value == self.update_values[0]:
+                temp_value = self.update_values[0]
+                self.update_values[0] = self.update_values[1]
+                self.update_values[1] = temp_value
+
         for data in self.update_values:
             # g_test_passed = False
             if self.data_size == 1:
-                self.download_data.append(data)
+                self.download_data.append(data & 0xFF)
                 self.download_data.append(0x00)
                 self.download_data.append(0x00)
                 self.download_data.append(0x00)
@@ -553,35 +828,37 @@ class UpdateValues(threading.Thread):
             g_input_updated = False
             g_output_updated = False
             thread_lock.release()
+            # Keep updating the input signal until the output signal has been updated
             while not g_output_updated:
-                # response_message = None
-                # send_try = 0
-                # while response_message is None or send_try < 10:
-                #     self.bus.send(set_mta)
-                #     response_message = self.check_xcp_response(self.bus, slave_id)
-                #     send_try += 1
-                self.bus.send(set_mta)
-                response_message = self.check_xcp_response(self.bus, slave_id)
-                if response_message is not None:
-                    if response_message.data[0] == 0xFF:
-                        # DOWNLOAD
-                        self.bus.send(cmd_download)
-                        response_message = self.check_xcp_response(self.bus, slave_id)
-                        if response_message is not None:
-                            thread_lock.acquire()
-                            g_value_updated = True
-                            g_expected_value = cmd_download.data[2]
-                            if self.data_size == 2:
-                                g_expected_value = (g_expected_value << 8) | cmd_download.data[3]
-                            elif self.data_size == 4:
-                                g_expected_value = (g_expected_value << 8) | cmd_download.data[3]
-                                g_expected_value = (g_expected_value << 8) | cmd_download.data[4]
-                                g_expected_value = (g_expected_value << 8) | cmd_download.data[5]
-                            thread_lock.release()
+                if not g_input_updated:
+                    self.bus.send(set_mta)
+                    response_message = self.check_xcp_response(self.bus, slave_id)
+                    if response_message is not None:
+                        if response_message.data[0] == 0xFF:
+                            # DOWNLOAD
+                            self.bus.send(cmd_download)
+                            response_message = self.check_xcp_response(self.bus, slave_id)
+                            # In XCP, there's no way to know if the response is for the request sent
+                            if response_message is not None:
+                                thread_lock.acquire()
+                                g_expected_value = cmd_download.data[2]
+                                if self.data_size == 2:
+                                    g_expected_value = (g_expected_value << 8) | cmd_download.data[3]
+                                elif self.data_size == 4:
+                                    g_expected_value = (g_expected_value << 8) | cmd_download.data[3]
+                                    g_expected_value = (g_expected_value << 8) | cmd_download.data[4]
+                                    g_expected_value = (g_expected_value << 8) | cmd_download.data[5]
+                                g_value_updated = True
+                                thread_lock.release()
+            # # Try
+            # g_input_updated = False
+            # g_output_updated = False
+            # g_value_updated = False
+            # # Try
             sleep(1)
             self.download_data = [0xF0, self.data_size]
 
-        # This thread has finished updating the input signal, end the IOStream thread
+        # This thread has finished updating the input signal, end the ApplicationIOStream/CANIOStream threads
         thread_lock.acquire()
         g_update_finished = True
         thread_lock.release()
@@ -614,17 +891,17 @@ Way of testing:
 if sys.version_info < MIN_PYTHON:
     sys.exit("Python %s.%s or later is required. Please check your Python version.\n" % MIN_PYTHON)
 
-debug = False
+debug = True
 parser = argparse.ArgumentParser()
 if debug:
     parser.add_argument('-v', dest='variant', help='set to GC7, for debugging', default='GC7')
-    parser.add_argument('-r', dest='retries', help='set to 2, for debugging', default=2)
-    parser.add_argument('-a', dest='update_address', help='set to no, for debugging', default='no')
+    parser.add_argument('-r', dest='retries', help='set to 0, for debugging', default=0)
+    parser.add_argument('-u', dest='update_address', help='set to no, for debugging', default='no')
 else:
     parser.add_argument("variant", help='variant to be tested', choices=['GC7', 'HR3'])
     parser.add_argument('-r', dest='retries', help='number of test retries for failed test results, default is 0',
                         default=0)
-    parser.add_argument('-a', dest='update_address',
+    parser.add_argument('-u', dest='update_address',
                         help='option to update internal and external signal information, default is yes',
                         choices=['yes', 'no'],
                         default='yes')
@@ -643,7 +920,7 @@ else:
     dbc_variant_folder_found = False
     dbc_files_found = False
     for dbc_root, dbc_dirs, dbc_files in os.walk(args.dbc_folder):
-        if dbc_root.find(args.variant) != -1:
+        if str(dbc_root).lower().find(str(args.variant).lower()) != -1:
             dbc_variant_folder_found = True
             for dbc_file in dbc_files:
                 if dbc_file.endswith(".dbc"):
@@ -652,30 +929,46 @@ else:
             break
 
     if not dbc_variant_folder_found:
-        print('{} folder not found in the DBC folder!'.format(args.variant), flush=True)
+        print('{} folder not found in the DBC folder!'.format(str(args.variant).upper()), flush=True)
     elif not dbc_files_found:
-        print('DBC files for {} not found in the DBC folder!'.format(args.variant), flush=True)
+        print('DBC files for {} not found in the DBC folder!'.format(str(args.variant).upper()), flush=True)
     else:
         max_retry = 0
         if args.retries is not None and args.retries > 0:
             max_retry = args.retries
         # Update the interface database for interface test
-        interface_test = InterfaceTestMT(args.variant, args.map_folder, args.dbc_folder)
+        interface_test = InterfaceTestMT(str(args.variant).upper(), args.map_folder, args.dbc_folder)
         # Update internal signal information
-        if not debug:
+        if str(args.update_address).lower() == 'yes':
             if interface_test.update_internal_signals() == 0:
                 print('Internal signals information were not updated! Aborting test..', flush=True)
                 sys.exit()
-            # Update external signal information
-            if interface_test.update_external_signals() == 0:
-                print('External signals information were not updated! Aborting test..', flush=True)
-                sys.exit()
             sys.exit()
+            # # Update external signal information
+            # if interface_test.update_external_signals() == 0:
+            #     print('External signals information were not updated! Aborting test..', flush=True)
+            #     sys.exit()
+            # sys.exit()
 
         db_connection = create_connection('interface.db')
-        io_pairing, io_pairing_count = execute_sql(db_connection,
-                                                   '''SELECT * FROM io_pairing ORDER BY destination_module;''',
-                                                   select=True, count=True)
+        if debug:
+            # io_pairing, io_pairing_count = execute_sql(db_connection,
+            #                                            '''SELECT * FROM io_pairing WHERE (
+            #                                            destination_signal='EYE324_6_0_COMPLEMENTARY_IND_C');''',
+            #                                            select=True, count=True)
+            io_pairing, io_pairing_count = execute_sql(db_connection,
+                                                       '''SELECT * FROM io_pairing WHERE (
+                                                       source_module<>'CAN' AND
+                                                       source_module<>'VP' AND
+                                                       destination_module<>'CAN' AND
+                                                       destination_module<>'DebugCAN' AND
+                                                       destination_module<>'VP'
+                                                       ORDER BY destination_module ASC);''',
+                                                       select=True, count=True)
+        else:
+            io_pairing, io_pairing_count = execute_sql(db_connection,
+                                                       '''SELECT * FROM io_pairing ORDER BY destination_module ASC;''',
+                                                       select=True, count=True)
         passed_count = 0
         tested_count = 0
         skipped_count = 0
@@ -685,10 +978,19 @@ else:
         # Connect to the XCP slave
         interface_test.connect()
         xcp_bus = interface_test.bus
+        can_bus = [interface_test.bus1, interface_test.bus2, interface_test.bus3, interface_test.bus4]
 
-        update_values = {'boolean': [1, 0],
-                         'uint8': [uint8_info('max'), uint8_info('min'), uint8_info('any')],
-                         'float32': [int(float32_info('max', to_hex=True), 16), int(float32_info('min', to_hex=True), 16), int(float32_info('any', to_hex=True), 16)]
+        # Values that will be used for testing the interface in the following order:
+        # max, min and any value (if applicable)
+        update_values = {
+            'boolean': [1, 0],
+            'uint8': data_type_info(np.uint8),
+            'uint16': data_type_info(np.uint16),
+            'uint32': data_type_info(np.uint32),
+            'sint8': data_type_info(np.int8),
+            'sint16': data_type_info(np.int16),
+            'sint32': data_type_info(np.int32),
+            'float32': data_type_info(np.float32)
                          }
         IF_test_finished = False
         retry_count = 0
@@ -700,117 +1002,269 @@ else:
             for io_pairing_row in io_pairing:
                 if module_name_o != io_pairing_row[3]:
                     if retry_count == 0:
-                        if module_name_o != '':
+                        if module_name_o != '' and log_to_output is not None:
                             log_to_output.close()
                             print('Finished tests for {}'.format(module_name_o), flush=True)
                         print('Starting tests for {}'.format(io_pairing_row[3]), flush=True)
                     else:
-                        if module_name_o != '':
+                        if module_name_o != '' and log_to_output is not None:
                             log_to_output.close()
                             print('Finished re-tests for {}'.format(module_name_o), flush=True)
                         print('Re-testing failed test items for {}'.format(io_pairing_row[3]), flush=True)
                     first_entry = True
 
-                source_signal = '{}_{}'.format(io_pairing_row[1], io_pairing_row[2])
-                source_signal_info = execute_sql(db_connection,
-                                                 '''SELECT * FROM internal_signals WHERE link=?''',
-                                                 (source_signal,),
-                                                 select=True, just_one=True
-                                                 )
-                destination_signal = '{}_{}'.format(io_pairing_row[3], io_pairing_row[4])
-                destination_signal_info = execute_sql(db_connection,
-                                                      '''SELECT * FROM internal_signals WHERE link=?''',
-                                                      (destination_signal,),
-                                                      select=True, just_one=True
-                                                      )
+                # print('Extracting source and destination signal information from the database..')
+                # Get more information about the input signal from the database
+                source = None
+                source_signal_info = None
+                if io_pairing_row[1] == 'CAN':
+                    source = {'signal': 'CAN_{}'.format(io_pairing_row[2])}
+                    source_signal_info = execute_sql(db_connection,
+                                                     '''SELECT * FROM external_signals WHERE link=?''',
+                                                     (source['signal'],),
+                                                     select=True, just_one=True
+                                                     )
+                elif io_pairing_row[1] != 'VP':  # Input signal is from APP
+                    source = {'signal': '{}_{}'.format(io_pairing_row[1], io_pairing_row[2])}
+                    source_signal_info = execute_sql(db_connection,
+                                                     '''SELECT * FROM internal_signals WHERE link=?''',
+                                                     (source['signal'],),
+                                                     select=True, just_one=True
+                                                     )
+
+                # Get more information about the output signal from the database
+                destination = None
+                destination_signal_info = None
+                if io_pairing_row[3] == 'CAN' or io_pairing_row[3] == 'DebugCAN':
+                    if io_pairing_row[3] == 'CAN':
+                        destination = {'signal': 'CAN_{}'.format(io_pairing_row[4])}
+                    else:
+                        destination = {'signal': 'DBG_{}'.format(io_pairing_row[4])}
+                    destination_signal_info = execute_sql(db_connection,
+                                                          '''SELECT * FROM external_signals WHERE link=?''',
+                                                          (destination['signal'],),
+                                                          select=True, just_one=True
+                                                          )
+                else:
+                    destination = {'signal': '{}_{}'.format(io_pairing_row[3], io_pairing_row[4])}
+                    destination_signal_info = execute_sql(db_connection,
+                                                          '''SELECT * FROM internal_signals WHERE link=?''',
+                                                          (destination['signal'],),
+                                                          select=True, just_one=True
+                                                          )
+                # Check for test items that need to be skipped to avoid errors (insufficient signal information, etc.)
                 if retry_count == 0:
-                    # 'Clean' the I/O pairing list
-                    # For debugging, skip CAN for now
-                    if io_pairing_row[1] == 'CAN' or io_pairing_row[3] == 'CAN' or io_pairing_row[1] == 'VP' or \
-                            io_pairing_row[3] == 'VP' or io_pairing_row[3] == 'DebugCAN':
-                        print('{}: Skipped {} -> {} - No tests yet for CAN and VP signals'.format(
-                            io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]), flush=True)
+                    skip_this_test_item = False
+                    skip_reason = ''
+                    # No information found for the source signal
+                    if source_signal_info is None:
+                        skip_this_test_item = True
+                        skip_reason = 'No information found for the source signal in the database'
+                    # No information found for the destination signal
+                    elif destination_signal_info is None:
+                        skip_this_test_item = True
+                        skip_reason = 'No information found for the destination signal'
+                    # For test items with VP source signals
+                    elif io_pairing_row[1] == 'VP':
+                        skip_this_test_item = True
+                        skip_reason = 'Test items with VP input not yet being tested'
+                    # For test items with CAN, VP or DebugCAN destination signals
+                    elif io_pairing_row[3] == 'CAN' or io_pairing_row[3] == 'VP' or io_pairing_row[3] == 'DebugCAN':
+                        # VP source signal
+                        if io_pairing_row[3] == 'VP':
+                            skip_this_test_item = True
+                            skip_reason = 'Test items with VP output not yet being tested'
+
+                        # No CAN channel assigned
+                        if str(destination_signal_info[4]) == '0':
+                            skip_this_test_item = True
+                            skip_reason = 'CAN channel set to 0 (should be 1, 2, 3 or 4), could be an IPC signal'
+
+                        # CAN output with single precision input
+                        elif source_signal_info[4] == 'float32':
+                            skip_this_test_item = True
+                            skip_reason = 'Floating point input to CAN output signal not yet being tested'
+
+                    elif (io_pairing[1] != 'CAN' and io_pairing[1] != 'VP') and \
+                            (io_pairing[3] != 'CAN' and io_pairing[3] != 'VP' and io_pairing[3] != 'DebugCAN'):
+                        # No address found for the source signal
+                        if int(source_signal_info[2]) == 0:
+                            skip_this_test_item = True
+                            skip_reason = 'No address found for the source signal'
+
+                        # No address found for the destination signal
+                        if int(destination_signal_info[2]) == 0:
+                            skip_this_test_item = True
+                            skip_reason = 'No address found for the destination signal'
+
+                        # Input and output signals have different data types (APP I/O)
+                        if source_signal_info[4] != destination_signal_info[4]:
+                            if source_signal_info[4] == 'float32':
+                                skip_this_test_item = True
+                                skip_reason = 'Single precision input to integer output not yet being tested'
+                            elif destination_signal_info[4] == 'float32':
+                                skip_this_test_item = True
+                                skip_reason = 'Integer input to single precision output not yet being tested'
+
+                        # Arrays, maps and tables for now
+                        if source['signal'].find('[') != -1 or destination['signal'].find('[') != -1:
+                            skip_this_test_item = True
+                            skip_reason = 'Array, maps and tables not yet being tested'
+
+                    if skip_this_test_item:
+                        print('{}: Skipped {} -> {} - {}'.format(
+                            io_pairing_row[3], io_pairing_row[2], io_pairing_row[4], skip_reason), flush=True)
                         execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
-                                    ('Skipped', 'N/A', 'CAN and VP signals not yet being tested', io_pairing_row[0]))
-                        db_connection.commit()
-                        module_name_o = io_pairing_row[3]
-                        skipped_count += 1
-                        continue
-                    # Skip array, maps and tables for now
-                    if source_signal.find('[') != -1 or destination_signal.find('[') != -1:
-                        print('{}: Skipped {} -> {} - No tests yet for arrays, tables and maps'.format(
-                            io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]), flush=True)
-                        execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
-                                    ('Skipped', 'N/A', 'Arrays/tables/maps not yet being tested', io_pairing_row[0]))
-                        db_connection.commit()
-                        module_name_o = io_pairing_row[3]
-                        skipped_count += 1
-                        continue
-                    # Skip if no information or address is found for the source signal
-                    if source_signal_info is None or int(source_signal_info[2]) == 0x0:
-                        print('{}: Skipped {} -> {} - No address found for the source signal'.format(
-                            io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]), flush=True)
-                        execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
-                                    ('Skipped', 'N/A', 'No address found for the source signal', io_pairing_row[0]))
-                        db_connection.commit()
-                        module_name_o = io_pairing_row[3]
-                        skipped_count += 1
-                        continue
-                    # Skip if no information or address is found for the destination signal
-                    if destination_signal_info is None or int(destination_signal_info[2]) == 0x0:
-                        print('{}: Skipped {} -> {} - No address found for the destination signal'.format(
-                            io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]), flush=True)
-                        execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
-                                    ('Skipped', 'N/A', 'No address found for the destination signal', io_pairing_row[0]))
-                        db_connection.commit()
-                        module_name_o = io_pairing_row[3]
-                        skipped_count += 1
-                        continue
-                    # # Skip float32 data type
-                    # if source_signal_info[4] == 'float32' or destination_signal_info[4] == 'float32':
-                    #     print('{}: Skipped {} -> {} - No tests yet for float32 data types..'.format(
-                    #         io_pairing_row[3], io_pairing_row[2], io_pairing_row[4]))
-                    #     execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
-                    #                 ('Skipped', 'N/A', 'float32 data types not yet being tested', io_pairing_row[0]))
-                    #     db_connection.commit()
-                    #     module_name_o = io_pairing_row[3]
-                    #     skipped_count += 1
-                    #     continue
-                    if source_signal_info[4] != destination_signal_info[4]:
-                        print('{}: Skipped {} -> {} - No tests yet for not matching data types ({} -> {})..'.format(
-                            io_pairing_row[3], io_pairing_row[2],
-                            io_pairing_row[4], source_signal_info[4], destination_signal_info[4]), flush=True)
-                        execute_sql(db_connection, '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
-                                    ('Skipped', 'N/A',
-                                     'No tests yet for not matching data types ({} -> {})'.format(
-                                         source_signal_info[4], destination_signal_info[4]),
+                                    ('Skipped', 'N/A', skip_reason,
                                      io_pairing_row[0]))
                         db_connection.commit()
                         module_name_o = io_pairing_row[3]
                         skipped_count += 1
                         continue
 
-                # Get details about the source signal
-                source_address = int(source_signal_info[2])
-                source_data_size = int(source_signal_info[5])
-                source_cycle_ms = int(source_signal_info[7])
-                source_data_type = source_signal_info[4]
+                # Add input signal information in the source dictionary
+                # Input from CAN
+                if io_pairing_row[1] == 'CAN':
+                    # destination['data_type'] = temp_data_type
+                    source['can_id'] = int(source_signal_info[3])
+                    source['can_ch'] = int(source_signal_info[4])
+                    source['byte'] = int(source_signal_info[5])
+                    source['bit'] = int(source_signal_info[6])
+                    source['length'] = int(source_signal_info[7])
+                    source['factor'] = float(source_signal_info[8]) \
+                        if str(source_signal_info[8]).find('.') != -1 else int(source_signal_info[8])
+                    source['offset'] = int(source_signal_info[9])
+                    source['min'] = float(source_signal_info[10]) \
+                        if str(source_signal_info[10]).find('.') != -1 else int(source_signal_info[10])
+                    source['max'] = float(source_signal_info[11]) \
+                        if str(source_signal_info[11]).find('.') != -1 else int(source_signal_info[11])
+                    source['cycle_ms'] = int(source_signal_info[12])
 
-                # Get details about the destination signal
-                destination_address = int(destination_signal_info[2])
-                destination_data_size = int(destination_signal_info[5])
-                destination_cycle_ms = int(destination_signal_info[7])
-                destination_data_type = destination_signal_info[4]
+                    # Skip if there is insufficient information about the CAN signal (e.g. no min/max values)
+                    if (source['min'] == 0 and source['max'] == 0) or source['factor'] == 0:
+                        print(
+                            '{}: Skipped {} -> {} - Incomplete CAN signal information (e.g. min, max, factor)'.format(
+                                io_pairing_row[3], io_pairing_row[2],
+                                io_pairing_row[4]), flush=True
+                        )
+                        execute_sql(db_connection,
+                                    '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
+                                    ('Skipped',
+                                     'N/A',
+                                     'Incomplete CAN signal information (e.g. min, max, factor)',
+                                     io_pairing_row[0])
+                                    )
+                        db_connection.commit()
+                        module_name_o = io_pairing_row[3]
+                        skipped_count += 1
+                        continue
+                elif io_pairing_row[1] != 'VP':  # Input from APP
+                    source['address'] = int(source_signal_info[2])
+                    source['data_size'] = int(source_signal_info[5])
+                    source['cycle_ms'] = int(source_signal_info[7])
+                    source['data_type'] = source_signal_info[4]
+
+                # Add output signal information in the destination dictionary
+                # Output to CAN or DebugCAN
+                if io_pairing_row[3] == 'CAN' or io_pairing_row[3] == 'DebugCAN':
+                    temp_data_type = 'int'
+                    # Check if the factor has a decimal point, signal must be floating-point
+                    if str(destination_signal_info[8]).find('.') != -1:
+                        temp_data_type = 'float'
+                    # Check if the minimum value of the CAN signal is signed
+                    elif str(destination_signal_info[10]).find('-') != -1 and \
+                            destination_signal_info[9] == '0':
+                        temp_data_type = 'sint'
+                    else:
+                        # Check if the bit length and the factor are 1, signal must be boolean/flag
+                        if str(destination_signal_info[8]) == '1' and str(destination_signal_info[11]) == '1':
+                            temp_data_type = 'boolean'
+
+                    # -------------------
+                    # Start here
+                    # -------------------
+                    # Unmatched I/O data types (conversion operation should be in the source)
+                    if source['data_type'] == 'float32' and temp_data_type.find('int') != -1:
+                        print(
+                            '{}: Skipped {} -> {} - No tests yet for not matching data types ({} -> {})..'.format(
+                                io_pairing_row[3], io_pairing_row[2],
+                                io_pairing_row[4], source['data_type'], temp_data_type), flush=True)
+                        execute_sql(db_connection,
+                                    '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
+                                    ('Skipped', 'N/A',
+                                     'No tests yet for not matching data types ({} -> {})'.format(
+                                         source['data_type'], temp_data_type),
+                                     io_pairing_row[0])
+                                    )
+                        db_connection.commit()
+                        module_name_o = io_pairing_row[3]
+                        skipped_count += 1
+                        continue
+
+                    destination['data_type'] = temp_data_type
+                    destination['can_id'] = int(destination_signal_info[3])
+                    destination['can_ch'] = int(destination_signal_info[4])
+                    destination['byte'] = int(destination_signal_info[5])
+                    destination['bit'] = int(destination_signal_info[6])
+                    destination['length'] = int(destination_signal_info[7])
+                    destination['factor'] = float(destination_signal_info[8]) \
+                        if str(destination_signal_info[8]).find('.') != -1 else int(destination_signal_info[8])
+                    destination['offset'] = int(destination_signal_info[9])
+                    destination['min'] = float(destination_signal_info[10]) \
+                        if str(destination_signal_info[10]).find('.') != -1 else int(destination_signal_info[10])
+                    destination['max'] = float(destination_signal_info[11]) \
+                        if str(destination_signal_info[11]).find('.') != -1 else int(destination_signal_info[11])
+                    destination['cycle_ms'] = int(destination_signal_info[12])
+
+                    # Skip if there is insufficient information about the CAN signal (e.g. no min/max values)
+                    if (destination['min'] == 0 and destination['max'] == 0) or destination['factor'] == 0:
+                        print(
+                            '{}: Skipped {} -> {} - Incomplete CAN signal information (e.g. min, max, factor)'.format(
+                                io_pairing_row[3], io_pairing_row[2],
+                                io_pairing_row[4]), flush=True
+                        )
+                        execute_sql(db_connection,
+                                    '''UPDATE io_pairing SET status=?, result=?, notes=? WHERE id=?;''',
+                                    ('Skipped',
+                                     'N/A',
+                                     'Incomplete CAN signal information (e.g. min, max, factor)',
+                                     io_pairing_row[0])
+                                    )
+                        db_connection.commit()
+                        module_name_o = io_pairing_row[3]
+                        skipped_count += 1
+                        continue
+                else:
+                    destination['address'] = int(destination_signal_info[2])
+                    destination['data_size'] = int(destination_signal_info[5])
+                    destination['cycle_ms'] = int(destination_signal_info[7])
+                    destination['data_type'] = destination_signal_info[4]
 
                 # For threading
+                # The input signal comes from CAN
+                g_source_can = False
+                # The output signal is a CAN signal
+                g_destination_can = False
+                # The updating of input values is finished
                 g_update_finished = False
+                # The input value has been updated
                 g_value_updated = False
+                # Expected value
                 g_expected_value = 0
+                # Check if the input signal has been updated
                 g_input_updated = False
+                # Timestamp when the input signal has been updated
                 g_input_timestamp_s = 0.0
+                # Check if the output signal has been updated
                 g_output_updated = False
+                # Timestamp when the output signal has been updated
                 g_output_timestamp_s = 0.0
+                # The test passed
                 g_test_passed = False
+                # CAN signal's initial value
+                g_initial_value = None
+                # Timeout counter for the output signal
+                g_output_timeout_counter = 0
 
                 thread_lock = threading.Lock()
                 threads = []
@@ -826,25 +1280,63 @@ else:
                     first_entry = False
 
                 # Create new threads
-                # IOStream(self, thread_id, name, bus, signal_name, signal_address, data_size, cycle):
-                thread1 = IOStream(1, "input", xcp_bus, source_signal,
-                                   source_address, source_data_size, source_cycle_ms)
-                thread2 = IOStream(2, "output", xcp_bus, destination_signal,
-                                   destination_address, destination_data_size, destination_cycle_ms)
-                # UpdateValues(self, thread_id, name, bus, signal_name, input_address, data_size, update_values[max, min, [any]]):
-                thread3 = UpdateValues(3, "update", xcp_bus, source_signal,
-                                       source_address, source_data_size, update_values[source_data_type])
+                # # Set update timeout in seconds
+                # thread0 = UpdateTimeout(0, "timeout", 1)
+                if io_pairing_row[1] == 'CAN':
+                    # Input signal is from CAN, start the CAN stream
+                    thread1 = CANIOStream(1, 'input', can_bus[source['can_ch']-1], source)
+                else:
+                    # ApplicationIOStream(self, thread_id, name, bus, signal_name, signal_address, data_size, cycle):
+                    thread1 = ApplicationIOStream(1, "input", xcp_bus, source)
+
+                # Determine the update values that will be set to the input signal
+                # APP -> CAN/DebugCAN
+                if io_pairing_row[3] == 'CAN' or io_pairing_row[3] == 'DebugCAN':
+                    g_destination_can = True
+                    # Set the update values based on the min, max and factor of the CAN signal
+                    if destination['data_type'] == 'boolean':
+                        update_values['others'] = [1, 0]
+                    else:
+                        # Convert min, max and factor to raw values
+                        max_value = physical_to_raw(destination['max'], destination['factor'], destination['offset'])
+                        min_value = physical_to_raw(destination['min'], destination['factor'], destination['offset'])
+                        any_value = physical_to_raw(destination['factor'], destination['factor'], destination['offset'])
+
+                        # Mask the values depending on the input data size
+                        if source['data_size'] == 1:
+                            max_value = max_value & 0xFF
+                            min_value = min_value & 0xFF
+                            any_value = any_value & 0xFF
+                        elif source['data_size'] == 2:
+                            max_value = max_value & 0xFFFF
+                            min_value = min_value & 0xFFFF
+                            any_value = any_value & 0xFFFF
+                        elif source['data_size'] == 4:
+                            max_value = max_value & 0xFFFFFFFF
+                            min_value = min_value & 0xFFFFFFFF
+                            any_value = any_value & 0xFFFFFFFF
+                        # Add the update values to the dictionary
+                        update_values['others'] = [max_value, min_value, any_value]
+                    # Start the output stream thread
+                    thread2 = CANIOStream(2, 'output', can_bus[destination['can_ch']-1], destination)
+                    # Start the update values thread
+                    thread3 = UpdateValues(3, "update", xcp_bus, source, update_values['others'])
+                else:  # APP -> APP
+                    thread2 = ApplicationIOStream(2, "output", xcp_bus, destination)
+                    thread3 = UpdateValues(3, "update", xcp_bus, source, update_values[source['data_type']])
 
                 # Start new threads
-                print('{}: Testing {} -> {}'.format(io_pairing_row[3],
+                print('{}: Testing {} -> {}'.format(io_pairing_row[3] if not g_destination_can else io_pairing_row[1],
                                                     io_pairing_row[2],
                                                     io_pairing_row[4]), flush=True)
+                # thread0.start()
                 thread1.start()
                 thread2.start()
                 sleep(3)
                 thread3.start()
 
                 # Add threads to thread list
+                # threads.append(thread0)
                 threads.append(thread1)
                 threads.append(thread2)
                 threads.append(thread3)
@@ -874,7 +1366,7 @@ else:
                     tested_count += 1
                 module_name_o = io_pairing_row[3]
 
-            if not first_entry:
+            if not first_entry and log_to_output is not None:
                 log_to_output.close()
 
             print('-----------------------------------', flush=True)
@@ -885,7 +1377,9 @@ else:
                     IF_test_finished = True
                 else:
                     io_pairing = execute_sql(db_connection,
-                                             '''SELECT * FROM io_pairing WHERE result='Failed' ORDER BY destination_module;''',
+                                             '''SELECT * FROM io_pairing 
+                                             WHERE result='Failed' 
+                                             ORDER BY destination_module;''',
                                              select=True)
                     print('The script is set to re-test failed test items {} time(s)'.format(max_retry), flush=True)
                     print('Running retry {} of {}..'.format(retry_count, max_retry), flush=True)
@@ -898,7 +1392,7 @@ else:
         # End logging (ASC and info)
         interface_test.end_logging()
 
-        print('', flush=True)
+        # print('', flush=True)
         print('Done!', flush=True)
         print('', flush=True)
         print('Test Results', flush=True)
