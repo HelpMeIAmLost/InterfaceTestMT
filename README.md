@@ -47,12 +47,16 @@ Aside from the libraries listed in the requirements.txt file, I used the followi
 py InterfaceTestMT.py variant [-r <number of retries>] [-a <yes/no>] [-m <map folder path>] [-d <DBC folder path>]
 ```
 Where,
+```
   variant - variant to be tested
+```
 Options:
+```
   -r <number of retries> - runs the test on failed results from the initial test for the number of retries defined in this option, default is 0
   -a <yes/no> - setting it to yes updates the information of input and output signals, default is no
   -m <map folder path> - points the script to the location of the map file relative to the script location, default is Build/
   -d <DBC folder path> - points the script to the location of the DBC files (with the folder structure described in the Usage section of this readme), default is DBC/
+```
 
 ## What's next?
 *  Code optimization
